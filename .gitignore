@@ -1,0 +1,23 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+.playwright-cli/
+
+# Java
+backend/target/
+.cache/
+*.log
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Runtime data
+data/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
