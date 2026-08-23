@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.exportflow.export.infrastructure.ExportAttemptMapper">
+    <resultMap id="attemptResult" type="com.example.exportflow.export.domain.ExportTaskAttempt">
+        <constructor>
+            <idArg column="id" javaType="java.lang.Long"/>
+            <arg column="task_id" javaType="_long"/>
+            <arg column="attempt_no" javaType="_int"/>
+            <arg column="execution_token" javaType="java.lang.String"/>
+            <arg column="worker_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="com.example.exportflow.export.domain.AttemptStatus"/>
+            <arg column="started_at" javaType="java.time.LocalDateTime"/>
+            <arg column="heartbeat_at" javaType="java.time.LocalDateTime"/>
+            <arg column="finished_at" javaType="java.time.LocalDateTime"/>
+            <arg column="failure_code" javaType="java.lang.String"/>
+            <arg column="failure_message" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <insert id="insert">
+        INSERT INTO export_task_attempt (
+            task_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at
+        ) VALUES (
+            #{taskId}, #{attemptNo}, #{executionToken}, #{workerId}, #{status}, #{startedAt}, #{heartbeatAt}
+        )
+    </insert>
+
+    <update id="heartbeat">UPDATE export_task_attempt SET heartbeat_at = #{now} WHERE execution_token = #{executionToken} AND status = 'PROCESSING'</update>
+    <update id="markSuccess">UPDATE export_task_attempt SET status = 'SUCCESS', heartbeat_at = #{now}, finished_at = #{now} WHERE execution_token = #{executionToken} AND status = 'PROCESSING'</update>
+    <update id="markFailed">
+        UPDATE export_task_attempt SET status = #{status}, failure_code = #{failureCode}, failure_message = #{failureMessage},
+            heartbeat_at = #{now}, finished_at = #{now}
+        WHERE execution_token = #{executionToken} AND status = 'PROCESSING'
+    </update>
+    <select id="findByTaskId" resultMap="attemptResult">
+        SELECT id, task_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at,
+               finished_at, failure_code, failure_message
+        FROM export_task_attempt WHERE task_id = #{taskId} ORDER BY attempt_no
+    </select>
+</mapper>

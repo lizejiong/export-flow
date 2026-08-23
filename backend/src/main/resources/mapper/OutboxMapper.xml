@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.exportflow.export.infrastructure.OutboxMapper">
+    <insert id="insert">
+        INSERT INTO outbox_event (
+            event_id, aggregate_id, event_type, payload, status, publish_attempts, next_retry_at, created_at
+        ) VALUES (
+            #{eventId}, #{aggregateId}, #{eventType}, CAST(#{payload} AS JSON), 'PENDING', 0, #{nextRetryAt}, #{createdAt}
+        )
+    </insert>
+
+    <resultMap id="outboxResult" type="com.example.exportflow.export.domain.OutboxEvent">
+        <constructor>
+            <idArg column="id" javaType="_long"/>
+            <arg column="event_id" javaType="java.lang.String"/>
+            <arg column="aggregate_id" javaType="_long"/>
+            <arg column="event_type" javaType="java.lang.String"/>
+            <arg column="payload" javaType="java.lang.String"/>
+            <arg column="status" javaType="com.example.exportflow.export.domain.OutboxStatus"/>
+            <arg column="publish_attempts" javaType="_int"/>
+            <arg column="next_retry_at" javaType="java.time.LocalDateTime"/>
+            <arg column="published_at" javaType="java.time.LocalDateTime"/>
+            <arg column="created_at" javaType="java.time.LocalDateTime"/>
+            <arg column="last_error" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findPending" resultMap="outboxResult">
+        SELECT id, event_id, aggregate_id, event_type, CAST(payload AS CHAR) AS payload, status,
+               publish_attempts, next_retry_at, published_at, created_at, last_error
+        FROM outbox_event
+        WHERE status = 'PENDING' AND next_retry_at &lt;= #{now}
+        ORDER BY id LIMIT #{limit}
+    </select>
+
+    <update id="markPublished">
+        UPDATE outbox_event SET status = 'PUBLISHED', published_at = #{publishedAt}, last_error = NULL
+        WHERE id = #{id} AND status = 'PENDING'
+    </update>
+
+    <update id="markFailed">
+        UPDATE outbox_event SET publish_attempts = publish_attempts + 1, next_retry_at = #{nextRetryAt},
+            last_error = #{lastError}
+        WHERE id = #{id} AND status = 'PENDING'
+    </update>
+</mapper>

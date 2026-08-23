@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.exportflow.export.infrastructure.ExportTaskMapper">
+    <resultMap id="taskResult" type="com.example.exportflow.export.domain.ExportTask">
+        <id property="id" column="id"/>
+        <result property="taskNo" column="task_no"/>
+        <result property="idempotencyKey" column="idempotency_key"/>
+        <result property="requestHash" column="request_hash"/>
+        <result property="exportType" column="export_type"/>
+        <result property="status" column="status"/>
+        <result property="stage" column="stage"/>
+        <result property="filterSnapshotJson" column="filter_snapshot_json"/>
+        <result property="snapshotMaxId" column="snapshot_max_id"/>
+        <result property="snapshotTime" column="snapshot_time"/>
+        <result property="exportFieldVersion" column="export_field_version"/>
+        <result property="expectedCount" column="expected_count"/>
+        <result property="exportedCount" column="exported_count"/>
+        <result property="progress" column="progress"/>
+        <result property="fileName" column="file_name"/>
+        <result property="filePath" column="file_path"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="fileExpireAt" column="file_expire_at"/>
+        <result property="autoAttemptCount" column="auto_attempt_count"/>
+        <result property="manualRetryIndex" column="manual_retry_index"/>
+        <result property="sourceTaskId" column="source_task_id"/>
+        <result property="rootTaskId" column="root_task_id"/>
+        <result property="failureCode" column="failure_code"/>
+        <result property="failureMessage" column="failure_message"/>
+        <result property="retryable" column="retryable"/>
+        <result property="workerId" column="worker_id"/>
+        <result property="executionToken" column="execution_token"/>
+        <result property="heartbeatAt" column="heartbeat_at"/>
+        <result property="version" column="version"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="lastDownloadedAt" column="last_downloaded_at"/>
+        <result property="downloadCount" column="download_count"/>
+    </resultMap>
+
+    <sql id="taskColumns">id, task_no, idempotency_key, request_hash, export_type, status, stage,
+        filter_snapshot_json, snapshot_max_id, snapshot_time, export_field_version, expected_count,
+        exported_count, progress, file_name, file_path, file_size, file_expire_at, auto_attempt_count,
+        manual_retry_index, source_task_id, root_task_id, failure_code, failure_message, retryable,
+        worker_id, execution_token, heartbeat_at, version, created_at, updated_at, started_at,
+        completed_at, last_downloaded_at, download_count</sql>
+
+    <select id="findById" resultMap="taskResult">SELECT <include refid="taskColumns"/> FROM export_task WHERE id = #{id}</select>
+    <select id="findByIdempotencyKey" resultMap="taskResult">SELECT <include refid="taskColumns"/> FROM export_task WHERE idempotency_key = #{key}</select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO export_task (
+            task_no, idempotency_key, request_hash, export_type, status, stage, filter_snapshot_json,
+            snapshot_max_id, snapshot_time, export_field_version, expected_count, exported_count,
+            progress, auto_attempt_count, manual_retry_index, source_task_id, root_task_id, retryable,
+            version, created_at, updated_at, download_count
+        ) VALUES (
+            #{taskNo}, #{idempotencyKey}, #{requestHash}, #{exportType}, #{status}, #{stage},
+            #{filterSnapshotJson}, #{snapshotMaxId}, #{snapshotTime}, #{exportFieldVersion},
+            #{expectedCount}, #{exportedCount}, #{progress}, #{autoAttemptCount}, #{manualRetryIndex},
+            #{sourceTaskId}, #{rootTaskId}, #{retryable}, #{version}, #{createdAt}, #{updatedAt}, #{downloadCount}
+        )
+    </insert>
+
+    <insert id="insertItems">
+        INSERT INTO export_task_item (task_id, order_id, created_at) VALUES
+        <foreach collection="orderIds" item="orderId" separator=",">
+            (#{taskId}, #{orderId}, #{createdAt})
+        </foreach>
+    </insert>
+
+    <select id="findItemIds" resultType="long">SELECT order_id FROM export_task_item WHERE task_id = #{taskId} ORDER BY order_id</select>
+
+    <update id="claim">
+        UPDATE export_task SET status = 'PROCESSING', stage = 'PREPARING', worker_id = #{workerId},
+            execution_token = #{executionToken}, heartbeat_at = #{now},
+            started_at = COALESCE(started_at, #{now}), auto_attempt_count = auto_attempt_count + 1,
+            progress = 1, exported_count = 0, failure_code = NULL, failure_message = NULL,
+            retryable = FALSE, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PENDING' AND auto_attempt_count &lt; #{maxAttempts}
+    </update>
+
+    <update id="updateProgress">
+        UPDATE export_task SET stage = #{stage}, progress = #{progress}, exported_count = #{exportedCount},
+            heartbeat_at = #{now}, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="heartbeat">
+        UPDATE export_task SET heartbeat_at = #{now}, updated_at = #{now}
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markSuccess">
+        UPDATE export_task SET status = 'SUCCESS', stage = 'COMPLETED', progress = 100,
+            exported_count = #{exportedCount}, file_name = #{fileName}, file_path = #{filePath},
+            file_size = #{fileSize}, completed_at = #{completedAt}, file_expire_at = #{expireAt},
+            heartbeat_at = #{completedAt}, updated_at = #{completedAt}, retryable = FALSE,
+            failure_code = NULL, failure_message = NULL, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markRetryPending">
+        UPDATE export_task SET status = 'PENDING', stage = 'RETRY_WAITING', progress = 0,
+            exported_count = 0, failure_code = #{failureCode}, failure_message = #{failureMessage},
+            retryable = TRUE, worker_id = NULL, execution_token = NULL, heartbeat_at = NULL,
+            updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markFailed">
+        UPDATE export_task SET status = 'FAILED', stage = 'COMPLETED', failure_code = #{failureCode},
+            failure_message = #{failureMessage}, retryable = #{retryable}, completed_at = #{now},
+            heartbeat_at = #{now}, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <select id="findStale" resultMap="taskResult">
+        SELECT <include refid="taskColumns"/> FROM export_task
+        WHERE status = 'PROCESSING' AND heartbeat_at &lt; #{cutoff}
+        ORDER BY heartbeat_at LIMIT #{limit}
+    </select>
+
+    <update id="recoverStale">
+        UPDATE export_task SET status = 'PENDING', stage = 'RECOVERING', progress = 0, exported_count = 0,
+            failure_code = 'WORKER_LOST', failure_message = 'Worker 心跳超时，任务将从头恢复', retryable = TRUE,
+            worker_id = NULL, execution_token = NULL, heartbeat_at = NULL, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+          AND heartbeat_at = #{observedHeartbeatAt}
+    </update>
+
+    <update id="failStale">
+        UPDATE export_task SET status = 'FAILED', stage = 'COMPLETED', failure_code = 'WORKER_LOST',
+            failure_message = 'Worker 心跳超时且自动执行次数已用尽', retryable = TRUE,
+            completed_at = #{now}, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+          AND heartbeat_at = #{observedHeartbeatAt}
+    </update>
+
+    <insert id="copyItems">
+        INSERT INTO export_task_item (task_id, order_id, created_at)
+        SELECT #{targetTaskId}, order_id, #{createdAt} FROM export_task_item WHERE task_id = #{sourceTaskId}
+    </insert>
+
+    <select id="countItems" resultType="long">SELECT COUNT(*) FROM export_task_item WHERE task_id = #{taskId}</select>
+
+    <sql id="taskQueryFilters">
+        <if test="taskNo != null and taskNo != ''">AND task_no LIKE CONCAT('%', #{taskNo}, '%')</if>
+        <if test="exportType != null">AND export_type = #{exportType}</if>
+        <if test="status != null">AND status = #{status}</if>
+        <if test="createdFrom != null">AND created_at &gt;= #{createdFrom}</if>
+        <if test="createdTo != null">AND created_at &lt;= #{createdTo}</if>
+    </sql>
+
+    <select id="findPageTasks" resultMap="taskResult">
+        SELECT <include refid="taskColumns"/> FROM export_task WHERE 1=1
+        <include refid="taskQueryFilters"/>
+        ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countTasks" resultType="long">
+        SELECT COUNT(*) FROM export_task WHERE 1=1 <include refid="taskQueryFilters"/>
+    </select>
+
+    <select id="findRetryChain" resultMap="taskResult">
+        SELECT <include refid="taskColumns"/> FROM export_task
+        WHERE id = #{rootTaskId} OR root_task_id = #{rootTaskId}
+        ORDER BY manual_retry_index, id
+    </select>
+
+    <update id="incrementDownload">
+        UPDATE export_task SET download_count = download_count + 1, last_downloaded_at = #{now}, updated_at = #{now}
+        WHERE id = #{taskId} AND status = 'SUCCESS' AND file_expire_at &gt; #{now}
+    </update>
+
+    <update id="markFileMissing">
+        UPDATE export_task SET status = 'FAILED', stage = 'COMPLETED', failure_code = 'FILE_MISSING',
+            failure_message = '导出文件不存在', retryable = FALSE, updated_at = #{now}
+        WHERE id = #{taskId} AND status = 'SUCCESS'
+    </update>
+
+    <select id="findExpired" resultMap="taskResult">
+        SELECT <include refid="taskColumns"/> FROM export_task
+        WHERE status = 'SUCCESS' AND file_expire_at &lt;= #{now}
+        ORDER BY file_expire_at LIMIT #{limit}
+    </select>
+
+    <update id="markExpired">
+        UPDATE export_task SET status = 'EXPIRED', stage = 'COMPLETED', file_path = NULL,
+            updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND status = 'SUCCESS' AND file_expire_at &lt;= #{now}
+    </update>
+</mapper>

@@ -1,0 +1,55 @@
+package com.example.exportflow.export.application;
+
+import com.example.exportflow.common.config.ExportProperties;
+import com.example.exportflow.export.domain.AttemptStatus;
+import com.example.exportflow.export.domain.ExportTask;
+import com.example.exportflow.export.domain.ExportTaskAttempt;
+import com.example.exportflow.export.infrastructure.ExportAttemptMapper;
+import com.example.exportflow.export.infrastructure.ExportTaskMapper;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class TaskClaimService {
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private final ExportTaskMapper taskMapper;
+    private final ExportAttemptMapper attemptMapper;
+    private final ExportProperties properties;
+    private final String workerId;
+
+    public TaskClaimService(ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper, ExportProperties properties) {
+        this.taskMapper = taskMapper;
+        this.attemptMapper = attemptMapper;
+        this.properties = properties;
+        this.workerId = buildWorkerId();
+    }
+
+    @Transactional
+    public Optional<ExportTask> claim(long taskId) {
+        LocalDateTime now = LocalDateTime.now(ZONE);
+        String token = UUID.randomUUID().toString();
+        if (taskMapper.claim(taskId, workerId, token, now, properties.maxAutoAttempts()) != 1) {
+            return Optional.empty();
+        }
+        ExportTask task = taskMapper.findById(taskId);
+        attemptMapper.insert(new ExportTaskAttempt(null, taskId, task.getAutoAttemptCount(), token, workerId,
+                AttemptStatus.PROCESSING, now, now, null, null, null));
+        return Optional.of(task);
+    }
+
+    private String buildWorkerId() {
+        try {
+            return InetAddress.getLocalHost().getHostName() + ":" + ManagementFactory.getRuntimeMXBean().getName();
+        } catch (Exception exception) {
+            return "worker:" + UUID.randomUUID().toString().substring(0, 8);
+        }
+    }
+}
+
