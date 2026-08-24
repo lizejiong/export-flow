@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 public record ExportTaskAttempt(
         Long id,
         long taskId,
+        long runId,
         int attemptNo,
         String executionToken,
         String workerId,
@@ -16,4 +17,3 @@ public record ExportTaskAttempt(
         String failureMessage
 ) {
 }
-

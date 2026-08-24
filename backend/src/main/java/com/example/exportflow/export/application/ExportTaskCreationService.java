@@ -3,10 +3,13 @@ package com.example.exportflow.export.application;
 import com.example.exportflow.common.config.ExportProperties;
 import com.example.exportflow.common.error.BusinessException;
 import com.example.exportflow.export.domain.ExportStage;
+import com.example.exportflow.export.domain.ExportRunTrigger;
 import com.example.exportflow.export.domain.ExportTask;
+import com.example.exportflow.export.domain.ExportTaskRun;
 import com.example.exportflow.export.domain.ExportTaskStatus;
 import com.example.exportflow.export.domain.ExportType;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
+import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.OutboxMapper;
 import com.example.exportflow.export.web.dto.CreateExportTaskRequest;
 import com.example.exportflow.export.web.dto.ExportTaskResponse;
@@ -32,15 +35,18 @@ public class ExportTaskCreationService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter TASK_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private final ExportTaskMapper taskMapper;
+    private final ExportRunMapper runMapper;
     private final OutboxMapper outboxMapper;
     private final OrderMapper orderMapper;
     private final RequestHasher requestHasher;
     private final ObjectMapper objectMapper;
     private final ExportProperties properties;
 
-    public ExportTaskCreationService(ExportTaskMapper taskMapper, OutboxMapper outboxMapper, OrderMapper orderMapper,
+    public ExportTaskCreationService(ExportTaskMapper taskMapper, ExportRunMapper runMapper,
+                                     OutboxMapper outboxMapper, OrderMapper orderMapper,
                                      RequestHasher requestHasher, ObjectMapper objectMapper, ExportProperties properties) {
         this.taskMapper = taskMapper;
+        this.runMapper = runMapper;
         this.outboxMapper = outboxMapper;
         this.orderMapper = orderMapper;
         this.requestHasher = requestHasher;
@@ -86,6 +92,12 @@ public class ExportTaskCreationService {
     private ExportTaskResponse insertTask(ExportTask task, List<Long> items, LocalDateTime now) {
         try {
             taskMapper.insert(task);
+            ExportTaskRun initialRun = initialRun(task, now);
+            runMapper.insert(initialRun);
+            if (taskMapper.setInitialRun(task.getId(), initialRun.getId(), properties.maxManualRetries(), now) != 1) {
+                throw new IllegalStateException("Cannot attach initial export run");
+            }
+            task.setCurrentRunId(initialRun.getId());
             if (!items.isEmpty()) taskMapper.insertItems(task.getId(), items, now);
             String eventId = UUID.randomUUID().toString();
             String payload = writeJson(Map.of("eventId", eventId, "taskId", task.getId(), "eventType", "EXPORT_TASK_CREATED"));
@@ -120,9 +132,25 @@ public class ExportTaskCreationService {
         task.setStage(ExportStage.QUEUED);
         task.setSnapshotTime(now);
         task.setExportFieldVersion(1);
+        task.setManualRetryLimit(properties.maxManualRetries());
         task.setCreatedAt(now);
         task.setUpdatedAt(now);
         return task;
+    }
+
+    private ExportTaskRun initialRun(ExportTask task, LocalDateTime now) {
+        ExportTaskRun run = new ExportTaskRun();
+        run.setTaskId(task.getId());
+        run.setRunNo(0);
+        run.setTriggerType(ExportRunTrigger.INITIAL);
+        run.setIdempotencyKey(task.getIdempotencyKey());
+        run.setRequestHash(task.getRequestHash());
+        run.setStatus(ExportTaskStatus.PENDING);
+        run.setStage(ExportStage.QUEUED);
+        run.setExpectedCount(task.getExpectedCount());
+        run.setCreatedAt(now);
+        run.setUpdatedAt(now);
+        return run;
     }
 
     private ExportTaskResponse replayOrConflict(ExportTask existing, String requestHash) {

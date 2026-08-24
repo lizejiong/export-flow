@@ -13,12 +13,12 @@ public record ExportTaskResponse(
         ExportTaskStatus status,
         long expectedCount,
         int progress,
+        int currentRunNo,
         LocalDateTime createdAt,
         boolean idempotentReplay
 ) {
     public static ExportTaskResponse from(ExportTask task, boolean replay) {
         return new ExportTaskResponse(task.getId(), task.getTaskNo(), task.getExportType(), task.getStatus(),
-                task.getExpectedCount(), task.getProgress(), task.getCreatedAt(), replay);
+                task.getExpectedCount(), task.getProgress(), task.getCurrentRunNo(), task.getCreatedAt(), replay);
     }
 }
-

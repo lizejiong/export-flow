@@ -19,7 +19,10 @@ public record TaskSummaryResponse(
         Long fileSize,
         LocalDateTime fileExpireAt,
         int autoAttemptCount,
-        int manualRetryIndex,
+        int currentRunNo,
+        int manualRetryCount,
+        int manualRetryLimit,
+        boolean canManualRetry,
         boolean retryable,
         String failureCode,
         String failureMessage,
@@ -30,9 +33,14 @@ public record TaskSummaryResponse(
     public static TaskSummaryResponse from(ExportTask task) {
         return new TaskSummaryResponse(task.getId(), task.getTaskNo(), task.getExportType(), task.getStatus(),
                 task.getStage(), task.getExpectedCount(), task.getExportedCount(), task.getProgress(),
-                task.getFileSize(), task.getFileExpireAt(), task.getAutoAttemptCount(), task.getManualRetryIndex(),
+                task.getFileSize(), task.getFileExpireAt(), task.getAutoAttemptCount(), task.getCurrentRunNo(),
+                task.getManualRetryCount(), task.getManualRetryLimit(), canManualRetry(task),
                 task.isRetryable(), task.getFailureCode(), task.getFailureMessage(), task.getCreatedAt(),
                 task.getStartedAt(), task.getCompletedAt());
     }
-}
 
+    private static boolean canManualRetry(ExportTask task) {
+        return !task.isArchived() && task.getStatus() == ExportTaskStatus.FAILED && task.isRetryable()
+                && task.getManualRetryCount() < task.getManualRetryLimit();
+    }
+}

@@ -4,9 +4,11 @@ import com.example.exportflow.common.error.BusinessException;
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskStatus;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
+import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.storage.LocalFileStorage;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,14 +20,18 @@ public class DownloadService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private final ExportTaskQueryService queryService;
     private final ExportTaskMapper taskMapper;
+    private final ExportRunMapper runMapper;
     private final LocalFileStorage storage;
 
-    public DownloadService(ExportTaskQueryService queryService, ExportTaskMapper taskMapper, LocalFileStorage storage) {
+    public DownloadService(ExportTaskQueryService queryService, ExportTaskMapper taskMapper,
+                           ExportRunMapper runMapper, LocalFileStorage storage) {
         this.queryService = queryService;
         this.taskMapper = taskMapper;
+        this.runMapper = runMapper;
         this.storage = storage;
     }
 
+    @Transactional
     public DownloadFile get(long taskId) {
         ExportTask task = queryService.requireTask(taskId);
         LocalDateTime now = LocalDateTime.now(ZONE);
@@ -38,9 +44,11 @@ public class DownloadService {
         Path path = storage.resolveStored(task.getFilePath());
         if (!Files.isRegularFile(path)) {
             taskMapper.markFileMissing(taskId, now);
+            if (task.getCurrentRunId() != null) runMapper.markFileMissing(task.getCurrentRunId(), now);
             throw new BusinessException("FILE_MISSING", HttpStatus.NOT_FOUND, "导出文件不存在");
         }
         taskMapper.incrementDownload(taskId, now);
+        if (task.getCurrentRunId() != null) runMapper.incrementDownload(task.getCurrentRunId(), now);
         return new DownloadFile(path, task.getFileName(), task.getFileSize() == null ? size(path) : task.getFileSize());
     }
 

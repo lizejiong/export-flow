@@ -15,6 +15,5 @@ public interface ExportAttemptMapper {
     int markFailed(@Param("executionToken") String executionToken, @Param("status") String status,
                    @Param("failureCode") String failureCode, @Param("failureMessage") String failureMessage,
                    @Param("now") LocalDateTime now);
-    List<ExportTaskAttempt> findByTaskId(@Param("taskId") long taskId);
+    List<ExportTaskAttempt> findByRunId(@Param("runId") long runId);
 }
-

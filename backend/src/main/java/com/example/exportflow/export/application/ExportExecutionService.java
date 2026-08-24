@@ -5,7 +5,6 @@ import com.example.exportflow.export.domain.ExportStage;
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskStatus;
 import com.example.exportflow.export.domain.ExportType;
-import com.example.exportflow.export.infrastructure.ExportAttemptMapper;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
 import com.example.exportflow.export.infrastructure.excel.OrderExcelWriter;
 import com.example.exportflow.export.infrastructure.progress.ProgressService;
@@ -29,24 +28,25 @@ public class ExportExecutionService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private final OrderMapper orderMapper;
     private final ExportTaskMapper taskMapper;
-    private final ExportAttemptMapper attemptMapper;
     private final OrderExcelWriter excelWriter;
     private final LocalFileStorage storage;
     private final ProgressService progressService;
     private final TaskFailureService failureService;
+    private final TaskSuccessService successService;
     private final ObjectMapper objectMapper;
     private final ExportProperties properties;
 
-    public ExportExecutionService(OrderMapper orderMapper, ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper,
+    public ExportExecutionService(OrderMapper orderMapper, ExportTaskMapper taskMapper,
                                   OrderExcelWriter excelWriter, LocalFileStorage storage, ProgressService progressService,
-                                  TaskFailureService failureService, ObjectMapper objectMapper, ExportProperties properties) {
+                                  TaskFailureService failureService, TaskSuccessService successService,
+                                  ObjectMapper objectMapper, ExportProperties properties) {
         this.orderMapper = orderMapper;
         this.taskMapper = taskMapper;
-        this.attemptMapper = attemptMapper;
         this.excelWriter = excelWriter;
         this.storage = storage;
         this.progressService = progressService;
         this.failureService = failureService;
+        this.successService = successService;
         this.objectMapper = objectMapper;
         this.properties = properties;
     }
@@ -85,10 +85,8 @@ public class ExportExecutionService {
             temporary = null;
             LocalDateTime completedAt = LocalDateTime.now(ZONE);
             LocalDateTime expireAt = completedAt.plus(properties.fileRetention());
-            int updated = taskMapper.markSuccess(task.getId(), task.getExecutionToken(), stored.downloadName(),
-                    stored.relativePath(), stored.size(), written, completedAt, expireAt);
-            ensureCurrent(updated == 1);
-            attemptMapper.markSuccess(task.getExecutionToken(), completedAt);
+            ensureCurrent(successService.complete(task, stored.downloadName(), stored.relativePath(), stored.size(),
+                    written, completedAt, expireAt));
             task.setStatus(ExportTaskStatus.SUCCESS);
             task.setStage(ExportStage.COMPLETED);
             task.setFileSize(stored.size());

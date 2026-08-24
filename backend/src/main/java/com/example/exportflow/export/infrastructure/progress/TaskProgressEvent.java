@@ -7,6 +7,7 @@ public record TaskProgressEvent(
         long taskId,
         String status,
         String stage,
+        int currentRunNo,
         int progress,
         long expectedCount,
         long exportedCount,

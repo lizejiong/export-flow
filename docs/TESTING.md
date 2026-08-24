@@ -36,7 +36,7 @@ docker compose config --quiet
 | 幂等 | 同 Key/同内容返回任务 1；同 Key/不同内容返回 409；不同 Key 创建任务 3 |
 | Outbox | 应用重启后待发布事件继续发布，RabbitMQ 消费恢复 |
 | 自动重试 | 注入的 SQL 失败真实生成 3 个 Attempt，最终 FAILED |
-| 手动重试 | 从失败任务创建任务 2，重试链长度 2，新任务 SUCCESS |
+| 手动重试 | 失败任务 ID 保持不变，依次创建 Run 1/Run 2；旧 Run 只读，达到上限后 `canManualRetry=false` |
 | 下载 | 5 行数据 + 1 行表头，XLSX ZIP 结构有效，下载次数递增 |
 | SSE | 收到 connected、heartbeat、5%–95% 进度、99% MOVING、100% succeeded |
 | 浏览器 | 订单页、任务页、详情抽屉实测；干净会话 0 errors / 0 warnings |

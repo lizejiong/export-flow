@@ -95,6 +95,7 @@ SSE、Excel 下载、Actuator 和 Swagger 不使用该 JSON 信封，保持各�
   "status": "PENDING",
   "expectedCount": 1000000,
   "progress": 0,
+  "currentRunNo": 0,
   "idempotentReplay": false
 }
 ```
@@ -109,11 +110,13 @@ SSE、Excel 下载、Actuator 和 Swagger 不使用该 JSON 信封，保持各�
 
 ### `GET /api/export-tasks/{taskId}`
 
-返回任务、逻辑快照、筛选 JSON、已选数量、下载次数、Attempt 列表和整条手动重试链。
+返回任务、逻辑快照、筛选 JSON、已选数量、下载次数和 `runs[]`。每个 Run 包含自己的状态、进度、故障信息和 `attempts[]` 自动执行记录。
 
 ### `POST /api/export-tasks/{taskId}/retry`
 
-请求头必须包含新的 `Idempotency-Key`。只允许最终失败且可重试的任务；创建一条新任务并复用原快照/Item。整条根链最多两次手动重试。
+请求头必须包含新的 `Idempotency-Key`。只允许当前 Run 最终失败、故障可重试且 `manualRetryCount < manualRetryLimit` 的逻辑任务。请求不会创建新的任务 ID，而是在同一任务下创建下一个 Run，并复用原快照和 Item；同一 Key 与同一任务重复提交时返回原结果。
+
+任务列表中的 `canManualRetry` 是唯一的按钮判定依据；`currentRunNo`、`manualRetryCount` 和 `manualRetryLimit` 用于展示，不应由前端自行推导权限。
 
 ### `GET /api/export-tasks/{taskId}/download`
 
@@ -135,7 +138,7 @@ SSE、Excel 下载、Actuator 和 Swagger 不使用该 JSON 信封，保持各�
 
 ```text
 event:task.progress
-data:{"eventType":"task.progress","taskId":9,"status":"PROCESSING","stage":"QUERYING_WRITING","progress":64,"expectedCount":1000000,"exportedCount":660000,"fileSize":null,"fileExpireAt":null,"updatedAt":"2026-08-22T23:37:24"}
+data:{"eventType":"task.progress","taskId":9,"status":"PROCESSING","stage":"QUERYING_WRITING","currentRunNo":1,"progress":64,"expectedCount":1000000,"exportedCount":660000,"fileSize":null,"fileExpireAt":null,"updatedAt":"2026-08-22T23:37:24"}
 ```
 
 `task.succeeded` 会同时携带 `fileSize` 和 `fileExpireAt`，前端可立即展示下载按钮。SSE 负责实时界面更新；终态到达后前端会自动发起一次 REST 校准，最终状态始终以 MySQL 为准。

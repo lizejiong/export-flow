@@ -2,6 +2,7 @@ package com.example.exportflow.export.web.dto;
 
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskAttempt;
+import com.example.exportflow.export.domain.ExportTaskRun;
 
 import java.util.List;
 
@@ -13,18 +14,44 @@ public record TaskDetailResponse(
         long selectedCount,
         int downloadCount,
         String lastDownloadedAt,
-        Long sourceTaskId,
-        Long rootTaskId,
-        List<AttemptResponse> attempts,
-        List<TaskSummaryResponse> retryChain
+        List<RunResponse> runs
 ) {
-    public static TaskDetailResponse from(ExportTask task, long selectedCount, List<ExportTaskAttempt> attempts,
-                                          List<ExportTask> chain) {
+    public static TaskDetailResponse from(ExportTask task, long selectedCount, List<RunResponse> runs) {
         return new TaskDetailResponse(TaskSummaryResponse.from(task), task.getFilterSnapshotJson(), task.getSnapshotMaxId(),
                 task.getSnapshotTime() == null ? null : task.getSnapshotTime().toString(), selectedCount,
                 task.getDownloadCount(), task.getLastDownloadedAt() == null ? null : task.getLastDownloadedAt().toString(),
-                task.getSourceTaskId(), task.getRootTaskId(), attempts.stream().map(AttemptResponse::from).toList(),
-                chain.stream().map(TaskSummaryResponse::from).toList());
+                runs);
+    }
+
+    public record RunResponse(
+            long id,
+            int runNo,
+            String triggerType,
+            String status,
+            String stage,
+            long expectedCount,
+            long exportedCount,
+            int progress,
+            int autoAttemptCount,
+            boolean retryable,
+            String failureCode,
+            String failureMessage,
+            Long fileSize,
+            String fileExpireAt,
+            String createdAt,
+            String startedAt,
+            String completedAt,
+            List<AttemptResponse> attempts
+    ) {
+        public static RunResponse from(ExportTaskRun run, List<ExportTaskAttempt> attempts) {
+            return new RunResponse(run.getId(), run.getRunNo(), run.getTriggerType().name(), run.getStatus().name(),
+                    run.getStage().name(), run.getExpectedCount(), run.getExportedCount(), run.getProgress(),
+                    run.getAutoAttemptCount(), run.isRetryable(), run.getFailureCode(), run.getFailureMessage(),
+                    run.getFileSize(), text(run.getFileExpireAt()), text(run.getCreatedAt()), text(run.getStartedAt()),
+                    text(run.getCompletedAt()), attempts.stream().map(AttemptResponse::from).toList());
+        }
+
+        private static String text(Object value) { return value == null ? null : value.toString(); }
     }
 
     public record AttemptResponse(
@@ -40,4 +67,3 @@ public record TaskDetailResponse(
         }
     }
 }
-

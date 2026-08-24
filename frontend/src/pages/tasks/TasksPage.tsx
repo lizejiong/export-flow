@@ -42,7 +42,12 @@ export default function TasksPage() {
 
   const retry = useMutation({
     mutationFn: (id: number) => api.retryTask(id, newIdempotencyKey()),
-    onSuccess(task) { message.success(`已创建重试任务 ${task.taskNo}`); queryClient.invalidateQueries({ queryKey: ['tasks'] }); setDetailId(task.id) },
+    onSuccess(task) {
+      message.success(`已发起第 ${task.currentRunNo} 次手动重试`)
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task-detail', task.id] })
+      setDetailId(task.id)
+    },
     onError(error) { message.error(error instanceof ApiError ? error.body.message : '重试失败') },
   })
 
@@ -59,18 +64,18 @@ export default function TasksPage() {
     { title: '阶段', dataIndex: 'stage', width: 145, render: (value) => <Tag>{stageLabels[value] ?? value}</Tag> },
     { title: '进度', width: 210, render: (_, task) => <div><Progress percent={task.progress} size="small" status={task.status === 'FAILED' ? 'exception' : task.status === 'SUCCESS' ? 'success' : 'active'} /><span className="muted">{task.exportedCount.toLocaleString()} / {task.expectedCount.toLocaleString()}</span></div> },
     { title: '文件大小', dataIndex: 'fileSize', width: 100, render: formatBytes },
-    { title: '尝试', width: 90, render: (_, task) => `${task.autoAttemptCount}/3 · ${task.manualRetryIndex}/2` },
+    { title: '尝试', width: 110, render: (_, task) => `${task.autoAttemptCount}/3 · ${task.manualRetryCount}/${task.manualRetryLimit}` },
     { title: '创建时间', dataIndex: 'createdAt', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm:ss') },
     { title: '操作', fixed: 'right', width: 220, render: (_, task) => <Space>
       <Button size="small" icon={<EyeOutlined />} onClick={() => setDetailId(task.id)}>详情</Button>
       {task.status === 'SUCCESS' && task.fileExpireAt && dayjs(task.fileExpireAt).isAfter(dayjs()) && <Button size="small" type="link" icon={<CloudDownloadOutlined />} onClick={() => api.downloadTask(task.id, `${task.taskNo}.xlsx`).catch((error) => message.error(error instanceof ApiError ? error.body.message : '下载失败'))}>下载</Button>}
-      {task.status === 'FAILED' && task.retryable && task.manualRetryIndex < 2 && <Button size="small" type="link" icon={<RetweetOutlined />} loading={retry.isPending} onClick={() => modal.confirm({ title: '手动重试？', content: '系统会复用原任务快照并创建一条关联的新任务。', onOk: () => retry.mutate(task.id) })}>重试</Button>}
+      {task.canManualRetry && <Button size="small" type="link" icon={<RetweetOutlined />} loading={retry.isPending} onClick={() => modal.confirm({ title: '手动重试？', content: `系统会复用原任务快照，在同一任务下发起 Run ${task.currentRunNo + 1}。`, onOk: () => retry.mutate(task.id) })}>重试</Button>}
     </Space> },
   ]
 
   return <>
     <div className="page-heading">
-      <div><Typography.Title level={2}>导出任务</Typography.Title><p>实时查看队列、生成进度、执行记录和失败重试链。</p></div>
+      <div><Typography.Title level={2}>导出任务</Typography.Title><p>实时查看队列、生成进度，以及按 Run / Attempt 分层的执行历史。</p></div>
       <Space><Tag color={eventMode === 'sse' ? 'green' : eventMode === 'polling' ? 'orange' : 'default'} icon={<WifiOutlined />}>{eventMode === 'sse' ? 'SSE 实时' : eventMode === 'polling' ? '轮询降级' : '正在连接'}</Tag><Button icon={<ReloadOutlined />} onClick={() => tasks.refetch()}>刷新</Button></Space>
     </div>
     <div className="panel filter-panel">

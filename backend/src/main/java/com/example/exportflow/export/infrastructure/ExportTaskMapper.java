@@ -12,8 +12,14 @@ import java.util.List;
 @Mapper
 public interface ExportTaskMapper {
     ExportTask findById(@Param("id") long id);
+    ExportTask findByIdForUpdate(@Param("id") long id);
     ExportTask findByIdempotencyKey(@Param("key") String key);
     int insert(ExportTask task);
+    int setInitialRun(@Param("taskId") long taskId, @Param("runId") long runId,
+                      @Param("manualRetryLimit") int manualRetryLimit, @Param("now") LocalDateTime now);
+    int startManualRun(@Param("taskId") long taskId, @Param("expectedRunId") long expectedRunId,
+                       @Param("runId") long runId, @Param("runNo") int runNo,
+                       @Param("now") LocalDateTime now);
     int insertItems(@Param("taskId") long taskId, @Param("orderIds") List<Long> orderIds,
                     @Param("createdAt") LocalDateTime createdAt);
     List<Long> findItemIds(@Param("taskId") long taskId);

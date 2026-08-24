@@ -58,6 +58,7 @@ export interface CreatedTask {
   status: TaskStatus
   expectedCount: number
   progress: number
+  currentRunNo: number
   createdAt: string
   idempotentReplay: boolean
 }
@@ -74,7 +75,10 @@ export interface TaskSummary {
   fileSize?: number
   fileExpireAt?: string
   autoAttemptCount: number
-  manualRetryIndex: number
+  currentRunNo: number
+  manualRetryCount: number
+  manualRetryLimit: number
+  canManualRetry: boolean
   retryable: boolean
   failureCode?: string
   failureMessage?: string
@@ -94,6 +98,27 @@ export interface TaskAttempt {
   failureMessage?: string
 }
 
+export interface TaskRun {
+  id: number
+  runNo: number
+  triggerType: 'INITIAL' | 'MANUAL_RETRY' | 'RECOVERY'
+  status: TaskStatus
+  stage: string
+  expectedCount: number
+  exportedCount: number
+  progress: number
+  autoAttemptCount: number
+  retryable: boolean
+  failureCode?: string
+  failureMessage?: string
+  fileSize?: number
+  fileExpireAt?: string
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  attempts: TaskAttempt[]
+}
+
 export interface TaskDetail {
   task: TaskSummary
   filterSnapshotJson?: string
@@ -102,10 +127,7 @@ export interface TaskDetail {
   selectedCount: number
   downloadCount: number
   lastDownloadedAt?: string
-  sourceTaskId?: number
-  rootTaskId?: number
-  attempts: TaskAttempt[]
-  retryChain: TaskSummary[]
+  runs: TaskRun[]
 }
 
 export interface TaskFilters {
@@ -121,6 +143,7 @@ export interface TaskProgressEvent {
   taskId: number
   status: TaskStatus
   stage: string
+  currentRunNo: number
   progress: number
   expectedCount: number
   exportedCount: number

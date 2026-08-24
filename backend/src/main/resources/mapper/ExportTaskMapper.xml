@@ -21,6 +21,11 @@
         <result property="fileSize" column="file_size"/>
         <result property="fileExpireAt" column="file_expire_at"/>
         <result property="autoAttemptCount" column="auto_attempt_count"/>
+        <result property="currentRunId" column="current_run_id"/>
+        <result property="currentRunNo" column="current_run_no"/>
+        <result property="manualRetryCount" column="manual_retry_count"/>
+        <result property="manualRetryLimit" column="manual_retry_limit"/>
+        <result property="archived" column="archived"/>
         <result property="manualRetryIndex" column="manual_retry_index"/>
         <result property="sourceTaskId" column="source_task_id"/>
         <result property="rootTaskId" column="root_task_id"/>
@@ -42,26 +47,46 @@
     <sql id="taskColumns">id, task_no, idempotency_key, request_hash, export_type, status, stage,
         filter_snapshot_json, snapshot_max_id, snapshot_time, export_field_version, expected_count,
         exported_count, progress, file_name, file_path, file_size, file_expire_at, auto_attempt_count,
+        current_run_id, current_run_no, manual_retry_count, manual_retry_limit, archived,
         manual_retry_index, source_task_id, root_task_id, failure_code, failure_message, retryable,
         worker_id, execution_token, heartbeat_at, version, created_at, updated_at, started_at,
         completed_at, last_downloaded_at, download_count</sql>
 
     <select id="findById" resultMap="taskResult">SELECT <include refid="taskColumns"/> FROM export_task WHERE id = #{id}</select>
+    <select id="findByIdForUpdate" resultMap="taskResult">SELECT <include refid="taskColumns"/> FROM export_task WHERE id = #{id} FOR UPDATE</select>
     <select id="findByIdempotencyKey" resultMap="taskResult">SELECT <include refid="taskColumns"/> FROM export_task WHERE idempotency_key = #{key}</select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO export_task (
             task_no, idempotency_key, request_hash, export_type, status, stage, filter_snapshot_json,
             snapshot_max_id, snapshot_time, export_field_version, expected_count, exported_count,
-            progress, auto_attempt_count, manual_retry_index, source_task_id, root_task_id, retryable,
-            version, created_at, updated_at, download_count
+            progress, auto_attempt_count, current_run_no, manual_retry_count, manual_retry_limit, archived,
+            manual_retry_index, source_task_id, root_task_id, retryable, version, created_at, updated_at, download_count
         ) VALUES (
             #{taskNo}, #{idempotencyKey}, #{requestHash}, #{exportType}, #{status}, #{stage},
             #{filterSnapshotJson}, #{snapshotMaxId}, #{snapshotTime}, #{exportFieldVersion},
-            #{expectedCount}, #{exportedCount}, #{progress}, #{autoAttemptCount}, #{manualRetryIndex},
+            #{expectedCount}, #{exportedCount}, #{progress}, #{autoAttemptCount}, #{currentRunNo},
+            #{manualRetryCount}, #{manualRetryLimit}, #{archived}, #{manualRetryIndex},
             #{sourceTaskId}, #{rootTaskId}, #{retryable}, #{version}, #{createdAt}, #{updatedAt}, #{downloadCount}
         )
     </insert>
+
+    <update id="setInitialRun">
+        UPDATE export_task SET current_run_id = #{runId}, current_run_no = 0,
+            manual_retry_count = 0, manual_retry_limit = #{manualRetryLimit}, updated_at = #{now}
+        WHERE id = #{taskId} AND current_run_id IS NULL AND archived = FALSE
+    </update>
+
+    <update id="startManualRun">
+        UPDATE export_task SET current_run_id = #{runId}, current_run_no = #{runNo},
+            manual_retry_count = #{runNo}, manual_retry_index = #{runNo}, status = 'PENDING', stage = 'QUEUED',
+            exported_count = 0, progress = 0, file_name = NULL, file_path = NULL, file_size = NULL,
+            file_expire_at = NULL, auto_attempt_count = 0, failure_code = NULL, failure_message = NULL,
+            retryable = FALSE, worker_id = NULL, execution_token = NULL, heartbeat_at = NULL,
+            started_at = NULL, completed_at = NULL, updated_at = #{now}, version = version + 1
+        WHERE id = #{taskId} AND current_run_id = #{expectedRunId} AND archived = FALSE
+          AND status = 'FAILED' AND retryable = TRUE AND manual_retry_count &lt; manual_retry_limit
+    </update>
 
     <insert id="insertItems">
         INSERT INTO export_task_item (task_id, order_id, created_at) VALUES
@@ -79,6 +104,7 @@
             progress = 1, exported_count = 0, failure_code = NULL, failure_message = NULL,
             retryable = FALSE, updated_at = #{now}, version = version + 1
         WHERE id = #{taskId} AND status = 'PENDING' AND auto_attempt_count &lt; #{maxAttempts}
+          AND current_run_id IS NOT NULL AND archived = FALSE
     </update>
 
     <update id="updateProgress">
@@ -118,7 +144,7 @@
 
     <select id="findStale" resultMap="taskResult">
         SELECT <include refid="taskColumns"/> FROM export_task
-        WHERE status = 'PROCESSING' AND heartbeat_at &lt; #{cutoff}
+        WHERE status = 'PROCESSING' AND heartbeat_at &lt; #{cutoff} AND archived = FALSE
         ORDER BY heartbeat_at LIMIT #{limit}
     </select>
 
@@ -154,13 +180,13 @@
     </sql>
 
     <select id="findPageTasks" resultMap="taskResult">
-        SELECT <include refid="taskColumns"/> FROM export_task WHERE 1=1
+        SELECT <include refid="taskColumns"/> FROM export_task WHERE archived = FALSE
         <include refid="taskQueryFilters"/>
         ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}
     </select>
 
     <select id="countTasks" resultType="long">
-        SELECT COUNT(*) FROM export_task WHERE 1=1 <include refid="taskQueryFilters"/>
+        SELECT COUNT(*) FROM export_task WHERE archived = FALSE <include refid="taskQueryFilters"/>
     </select>
 
     <select id="findRetryChain" resultMap="taskResult">

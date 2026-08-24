@@ -5,6 +5,7 @@ import com.example.exportflow.export.domain.AttemptStatus;
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskAttempt;
 import com.example.exportflow.export.infrastructure.ExportAttemptMapper;
+import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,12 +22,15 @@ public class TaskClaimService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private final ExportTaskMapper taskMapper;
     private final ExportAttemptMapper attemptMapper;
+    private final ExportRunMapper runMapper;
     private final ExportProperties properties;
     private final String workerId;
 
-    public TaskClaimService(ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper, ExportProperties properties) {
+    public TaskClaimService(ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper,
+                            ExportRunMapper runMapper, ExportProperties properties) {
         this.taskMapper = taskMapper;
         this.attemptMapper = attemptMapper;
+        this.runMapper = runMapper;
         this.properties = properties;
         this.workerId = buildWorkerId();
     }
@@ -39,7 +43,11 @@ public class TaskClaimService {
             return Optional.empty();
         }
         ExportTask task = taskMapper.findById(taskId);
-        attemptMapper.insert(new ExportTaskAttempt(null, taskId, task.getAutoAttemptCount(), token, workerId,
+        if (task.getCurrentRunId() == null || runMapper.markProcessing(task.getCurrentRunId(), workerId, token, now,
+                properties.maxAutoAttempts()) != 1) {
+            throw new IllegalStateException("Cannot claim current export run");
+        }
+        attemptMapper.insert(new ExportTaskAttempt(null, taskId, task.getCurrentRunId(), task.getAutoAttemptCount(), token, workerId,
                 AttemptStatus.PROCESSING, now, now, null, null, null));
         return Optional.of(task);
     }
@@ -52,4 +60,3 @@ public class TaskClaimService {
         }
     }
 }
-

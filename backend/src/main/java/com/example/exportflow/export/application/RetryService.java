@@ -1,11 +1,12 @@
 package com.example.exportflow.export.application;
 
-import com.example.exportflow.common.config.ExportProperties;
 import com.example.exportflow.common.error.BusinessException;
 import com.example.exportflow.export.domain.ExportStage;
+import com.example.exportflow.export.domain.ExportRunTrigger;
 import com.example.exportflow.export.domain.ExportTask;
+import com.example.exportflow.export.domain.ExportTaskRun;
 import com.example.exportflow.export.domain.ExportTaskStatus;
-import com.example.exportflow.export.domain.ExportType;
+import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
 import com.example.exportflow.export.infrastructure.OutboxMapper;
 import com.example.exportflow.export.web.dto.ExportTaskResponse;
@@ -19,7 +20,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
@@ -27,17 +27,16 @@ import java.util.UUID;
 @Service
 public class RetryService {
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
-    private static final DateTimeFormatter TASK_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private final ExportTaskMapper taskMapper;
+    private final ExportRunMapper runMapper;
     private final OutboxMapper outboxMapper;
-    private final ExportProperties properties;
     private final ObjectMapper objectMapper;
 
-    public RetryService(ExportTaskMapper taskMapper, OutboxMapper outboxMapper,
-                        ExportProperties properties, ObjectMapper objectMapper) {
+    public RetryService(ExportTaskMapper taskMapper, ExportRunMapper runMapper, OutboxMapper outboxMapper,
+                        ObjectMapper objectMapper) {
         this.taskMapper = taskMapper;
+        this.runMapper = runMapper;
         this.outboxMapper = outboxMapper;
-        this.properties = properties;
         this.objectMapper = objectMapper;
     }
 
@@ -45,47 +44,57 @@ public class RetryService {
     public ExportTaskResponse retry(long sourceTaskId, String idempotencyKey) {
         validateKey(idempotencyKey);
         String requestHash = retryHash(sourceTaskId);
-        ExportTask replay = taskMapper.findByIdempotencyKey(idempotencyKey);
+        ExportTaskRun replay = runMapper.findByIdempotencyKey(idempotencyKey);
         if (replay != null) {
-            if (!requestHash.equals(replay.getRequestHash())) throw reused();
-            return ExportTaskResponse.from(replay, true);
+            if (replay.getTaskId() != sourceTaskId || !requestHash.equals(replay.getRequestHash())) throw reused();
+            ExportTask replayTask = taskMapper.findById(sourceTaskId);
+            if (replayTask == null) throw notFound();
+            return ExportTaskResponse.from(replayTask, true);
         }
-        ExportTask source = taskMapper.findById(sourceTaskId);
-        if (source == null) throw new BusinessException("TASK_NOT_FOUND", HttpStatus.NOT_FOUND, "导出任务不存在");
+        ExportTask source = taskMapper.findByIdForUpdate(sourceTaskId);
+        if (source == null || source.isArchived()) throw notFound();
         if (source.getStatus() != ExportTaskStatus.FAILED || !source.isRetryable()) {
             throw new BusinessException("TASK_NOT_RETRYABLE", HttpStatus.CONFLICT, "当前任务不可手动重试");
         }
-        long rootTaskId = source.getRootTaskId() == null ? source.getId() : source.getRootTaskId();
-        int maxRetryIndex = taskMapper.findRetryChain(rootTaskId).stream()
-                .mapToInt(ExportTask::getManualRetryIndex).max().orElse(0);
-        if (maxRetryIndex >= properties.maxManualRetries()) {
+        if (source.getCurrentRunId() == null) {
+            throw new IllegalStateException("Export task has no current run");
+        }
+        if (source.getManualRetryCount() >= source.getManualRetryLimit()) {
             throw new BusinessException("MANUAL_RETRY_LIMIT_REACHED", HttpStatus.CONFLICT, "已达到手动重试次数上限");
         }
 
         LocalDateTime now = LocalDateTime.now(ZONE);
-        ExportTask target = new ExportTask();
-        target.setTaskNo("EXP" + TASK_TIME.format(now) + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        target.setIdempotencyKey(idempotencyKey);
-        target.setRequestHash(requestHash);
-        target.setExportType(source.getExportType());
-        target.setStatus(ExportTaskStatus.PENDING);
-        target.setStage(ExportStage.QUEUED);
-        target.setFilterSnapshotJson(source.getFilterSnapshotJson());
-        target.setSnapshotMaxId(source.getSnapshotMaxId());
-        target.setSnapshotTime(source.getSnapshotTime());
-        target.setExportFieldVersion(source.getExportFieldVersion());
-        target.setExpectedCount(source.getExpectedCount());
-        target.setManualRetryIndex(maxRetryIndex + 1);
-        target.setSourceTaskId(source.getId());
-        target.setRootTaskId(rootTaskId);
-        target.setCreatedAt(now);
-        target.setUpdatedAt(now);
-        taskMapper.insert(target);
-        if (source.getExportType() == ExportType.SELECTED) {
-            taskMapper.copyItems(source.getId(), target.getId(), now);
+        int runNo = source.getManualRetryCount() + 1;
+        ExportTaskRun run = new ExportTaskRun();
+        run.setTaskId(source.getId());
+        run.setRunNo(runNo);
+        run.setTriggerType(ExportRunTrigger.MANUAL_RETRY);
+        run.setIdempotencyKey(idempotencyKey);
+        run.setRequestHash(requestHash);
+        run.setStatus(ExportTaskStatus.PENDING);
+        run.setStage(ExportStage.QUEUED);
+        run.setExpectedCount(source.getExpectedCount());
+        run.setCreatedAt(now);
+        run.setUpdatedAt(now);
+        runMapper.insert(run);
+        if (taskMapper.startManualRun(source.getId(), source.getCurrentRunId(), run.getId(), runNo, now) != 1) {
+            throw new BusinessException("TASK_RETRY_CONFLICT", HttpStatus.CONFLICT, "任务状态已变化，请刷新后重试");
         }
-        insertEvent(target.getId(), now);
-        return ExportTaskResponse.from(target, false);
+        source.setCurrentRunId(run.getId());
+        source.setCurrentRunNo(runNo);
+        source.setManualRetryCount(runNo);
+        source.setManualRetryIndex(runNo);
+        source.setStatus(ExportTaskStatus.PENDING);
+        source.setStage(ExportStage.QUEUED);
+        source.setAutoAttemptCount(0);
+        source.setProgress(0);
+        source.setExportedCount(0);
+        source.setRetryable(false);
+        source.setFailureCode(null);
+        source.setFailureMessage(null);
+        source.setUpdatedAt(now);
+        insertEvent(source.getId(), now);
+        return ExportTaskResponse.from(source, false);
     }
 
     private void insertEvent(long taskId, LocalDateTime now) {
@@ -116,5 +125,9 @@ public class RetryService {
 
     private BusinessException reused() {
         return new BusinessException("IDEMPOTENCY_KEY_REUSED", HttpStatus.CONFLICT, "相同 Idempotency-Key 不能用于不同请求");
+    }
+
+    private BusinessException notFound() {
+        return new BusinessException("TASK_NOT_FOUND", HttpStatus.NOT_FOUND, "导出任务不存在");
     }
 }

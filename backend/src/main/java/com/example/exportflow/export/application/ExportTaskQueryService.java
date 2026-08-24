@@ -6,6 +6,7 @@ import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskStatus;
 import com.example.exportflow.export.domain.ExportType;
 import com.example.exportflow.export.infrastructure.ExportAttemptMapper;
+import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
 import com.example.exportflow.export.web.dto.TaskDetailResponse;
 import com.example.exportflow.export.web.dto.TaskSummaryResponse;
@@ -19,10 +20,12 @@ import java.util.List;
 public class ExportTaskQueryService {
     private final ExportTaskMapper taskMapper;
     private final ExportAttemptMapper attemptMapper;
+    private final ExportRunMapper runMapper;
 
-    public ExportTaskQueryService(ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper) {
+    public ExportTaskQueryService(ExportTaskMapper taskMapper, ExportAttemptMapper attemptMapper, ExportRunMapper runMapper) {
         this.taskMapper = taskMapper;
         this.attemptMapper = attemptMapper;
+        this.runMapper = runMapper;
     }
 
     public PageResponse<TaskSummaryResponse> findPage(String taskNo, ExportType exportType, ExportTaskStatus status,
@@ -41,14 +44,15 @@ public class ExportTaskQueryService {
     public TaskDetailResponse detail(long taskId) {
         ExportTask task = requireTask(taskId);
         long selectedCount = task.getExportType() == ExportType.SELECTED ? taskMapper.countItems(taskId) : 0;
-        long root = task.getRootTaskId() == null ? task.getId() : task.getRootTaskId();
-        return TaskDetailResponse.from(task, selectedCount, attemptMapper.findByTaskId(taskId), taskMapper.findRetryChain(root));
+        List<TaskDetailResponse.RunResponse> runs = runMapper.findByTaskId(taskId).stream()
+                .map(run -> TaskDetailResponse.RunResponse.from(run, attemptMapper.findByRunId(run.getId())))
+                .toList();
+        return TaskDetailResponse.from(task, selectedCount, runs);
     }
 
     public ExportTask requireTask(long taskId) {
         ExportTask task = taskMapper.findById(taskId);
-        if (task == null) throw new BusinessException("TASK_NOT_FOUND", HttpStatus.NOT_FOUND, "导出任务不存在");
+        if (task == null || task.isArchived()) throw new BusinessException("TASK_NOT_FOUND", HttpStatus.NOT_FOUND, "导出任务不存在");
         return task;
     }
 }
-

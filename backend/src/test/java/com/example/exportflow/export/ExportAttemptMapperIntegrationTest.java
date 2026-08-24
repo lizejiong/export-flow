@@ -25,12 +25,12 @@ class ExportAttemptMapperIntegrationTest {
     void insertsImmutableAttemptWithoutWritingGeneratedIdBackIntoRecord() {
         LocalDateTime now = LocalDateTime.now();
         ExportTaskAttempt attempt = new ExportTaskAttempt(
-                null, 99L, 1, "token-1", "worker-1", AttemptStatus.PROCESSING,
+                null, 99L, 10L, 1, "token-1", "worker-1", AttemptStatus.PROCESSING,
                 now, now, null, null, null
         );
 
         assertThat(mapper.insert(attempt)).isEqualTo(1);
-        assertThat(mapper.findByTaskId(99L)).singleElement().satisfies(saved -> {
+        assertThat(mapper.findByRunId(10L)).singleElement().satisfies(saved -> {
             assertThat(saved.id()).isNotNull();
             assertThat(saved.attemptNo()).isEqualTo(1);
             assertThat(saved.executionToken()).isEqualTo("token-1");

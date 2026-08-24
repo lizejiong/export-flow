@@ -16,15 +16,18 @@ export const statusColors: Record<TaskStatus, string> = {
 
 export function mergeTaskEvent(task: TaskSummary, event: TaskProgressEvent): TaskSummary {
   if (task.id !== event.taskId) return task
+  const newRun = event.currentRunNo > task.currentRunNo
   const terminal = ['SUCCESS', 'FAILED', 'EXPIRED'].includes(task.status)
-  if (terminal && event.status === 'PROCESSING') return task
+  if (!newRun && terminal && event.status === 'PROCESSING') return task
   return {
     ...task,
     status: event.status,
     stage: event.stage,
-    progress: Math.max(task.progress, event.progress),
+    currentRunNo: event.currentRunNo,
+    manualRetryCount: Math.max(task.manualRetryCount, event.currentRunNo),
+    progress: newRun ? event.progress : Math.max(task.progress, event.progress),
     expectedCount: event.expectedCount,
-    exportedCount: Math.max(task.exportedCount, event.exportedCount),
+    exportedCount: newRun ? event.exportedCount : Math.max(task.exportedCount, event.exportedCount),
     fileSize: event.fileSize ?? task.fileSize,
     fileExpireAt: event.fileExpireAt ?? task.fileExpireAt,
   }

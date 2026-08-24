@@ -5,6 +5,7 @@
         <constructor>
             <idArg column="id" javaType="java.lang.Long"/>
             <arg column="task_id" javaType="_long"/>
+            <arg column="run_id" javaType="_long"/>
             <arg column="attempt_no" javaType="_int"/>
             <arg column="execution_token" javaType="java.lang.String"/>
             <arg column="worker_id" javaType="java.lang.String"/>
@@ -19,9 +20,9 @@
 
     <insert id="insert">
         INSERT INTO export_task_attempt (
-            task_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at
+            task_id, run_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at
         ) VALUES (
-            #{taskId}, #{attemptNo}, #{executionToken}, #{workerId}, #{status}, #{startedAt}, #{heartbeatAt}
+            #{taskId}, #{runId}, #{attemptNo}, #{executionToken}, #{workerId}, #{status}, #{startedAt}, #{heartbeatAt}
         )
     </insert>
 
@@ -32,9 +33,9 @@
             heartbeat_at = #{now}, finished_at = #{now}
         WHERE execution_token = #{executionToken} AND status = 'PROCESSING'
     </update>
-    <select id="findByTaskId" resultMap="attemptResult">
-        SELECT id, task_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at,
+    <select id="findByRunId" resultMap="attemptResult">
+        SELECT id, task_id, run_id, attempt_no, execution_token, worker_id, status, started_at, heartbeat_at,
                finished_at, failure_code, failure_message
-        FROM export_task_attempt WHERE task_id = #{taskId} ORDER BY attempt_no
+        FROM export_task_attempt WHERE run_id = #{runId} ORDER BY attempt_no
     </select>
 </mapper>

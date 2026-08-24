@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.exportflow.export.infrastructure.ExportRunMapper">
+    <resultMap id="runResult" type="com.example.exportflow.export.domain.ExportTaskRun">
+        <id property="id" column="id"/>
+        <result property="taskId" column="task_id"/>
+        <result property="runNo" column="run_no"/>
+        <result property="triggerType" column="trigger_type"/>
+        <result property="idempotencyKey" column="idempotency_key"/>
+        <result property="requestHash" column="request_hash"/>
+        <result property="status" column="status"/>
+        <result property="stage" column="stage"/>
+        <result property="expectedCount" column="expected_count"/>
+        <result property="exportedCount" column="exported_count"/>
+        <result property="progress" column="progress"/>
+        <result property="fileName" column="file_name"/>
+        <result property="filePath" column="file_path"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="fileExpireAt" column="file_expire_at"/>
+        <result property="autoAttemptCount" column="auto_attempt_count"/>
+        <result property="failureCode" column="failure_code"/>
+        <result property="failureMessage" column="failure_message"/>
+        <result property="retryable" column="retryable"/>
+        <result property="workerId" column="worker_id"/>
+        <result property="executionToken" column="execution_token"/>
+        <result property="heartbeatAt" column="heartbeat_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="lastDownloadedAt" column="last_downloaded_at"/>
+        <result property="downloadCount" column="download_count"/>
+        <result property="legacyTaskId" column="legacy_task_id"/>
+    </resultMap>
+
+    <sql id="runColumns">id, task_id, run_no, trigger_type, idempotency_key, request_hash, status, stage,
+        expected_count, exported_count, progress, file_name, file_path, file_size, file_expire_at,
+        auto_attempt_count, failure_code, failure_message, retryable, worker_id, execution_token,
+        heartbeat_at, created_at, updated_at, started_at, completed_at, last_downloaded_at,
+        download_count, legacy_task_id</sql>
+
+    <select id="findById" resultMap="runResult">
+        SELECT <include refid="runColumns"/> FROM export_task_run WHERE id = #{id}
+    </select>
+    <select id="findByIdempotencyKey" resultMap="runResult">
+        SELECT <include refid="runColumns"/> FROM export_task_run WHERE idempotency_key = #{key}
+    </select>
+    <select id="findByTaskId" resultMap="runResult">
+        SELECT <include refid="runColumns"/> FROM export_task_run WHERE task_id = #{taskId} ORDER BY run_no
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO export_task_run (
+            task_id, run_no, trigger_type, idempotency_key, request_hash, status, stage,
+            expected_count, exported_count, progress, auto_attempt_count, retryable,
+            created_at, updated_at, download_count
+        ) VALUES (
+            #{taskId}, #{runNo}, #{triggerType}, #{idempotencyKey}, #{requestHash}, #{status}, #{stage},
+            #{expectedCount}, #{exportedCount}, #{progress}, #{autoAttemptCount}, #{retryable},
+            #{createdAt}, #{updatedAt}, #{downloadCount}
+        )
+    </insert>
+
+    <update id="markProcessing">
+        UPDATE export_task_run SET status = 'PROCESSING', stage = 'PREPARING', worker_id = #{workerId},
+            execution_token = #{executionToken}, heartbeat_at = #{now}, started_at = COALESCE(started_at, #{now}),
+            auto_attempt_count = auto_attempt_count + 1, progress = 1, exported_count = 0,
+            failure_code = NULL, failure_message = NULL, retryable = FALSE, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PENDING' AND auto_attempt_count &lt; #{maxAttempts}
+    </update>
+
+    <update id="updateProgress">
+        UPDATE export_task_run SET stage = #{stage}, progress = #{progress}, exported_count = #{exportedCount},
+            heartbeat_at = #{now}, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markSuccess">
+        UPDATE export_task_run SET status = 'SUCCESS', stage = 'COMPLETED', progress = 100,
+            exported_count = #{exportedCount}, file_name = #{fileName}, file_path = #{filePath},
+            file_size = #{fileSize}, completed_at = #{completedAt}, file_expire_at = #{expireAt},
+            heartbeat_at = #{completedAt}, updated_at = #{completedAt}, retryable = FALSE,
+            failure_code = NULL, failure_message = NULL
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markRetryPending">
+        UPDATE export_task_run SET status = 'PENDING', stage = 'RETRY_WAITING', progress = 0,
+            exported_count = 0, failure_code = #{failureCode}, failure_message = #{failureMessage},
+            retryable = TRUE, worker_id = NULL, execution_token = NULL, heartbeat_at = NULL,
+            updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="markFailed">
+        UPDATE export_task_run SET status = 'FAILED', stage = 'COMPLETED', failure_code = #{failureCode},
+            failure_message = #{failureMessage}, retryable = #{retryable}, completed_at = #{now},
+            heartbeat_at = #{now}, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="recoverStale">
+        UPDATE export_task_run SET status = 'PENDING', stage = 'RECOVERING', progress = 0, exported_count = 0,
+            failure_code = 'WORKER_LOST', failure_message = 'Worker heartbeat timed out; restarting this run',
+            retryable = TRUE, worker_id = NULL, execution_token = NULL, heartbeat_at = NULL, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+          AND heartbeat_at = #{observedHeartbeatAt}
+    </update>
+
+    <update id="failStale">
+        UPDATE export_task_run SET status = 'FAILED', stage = 'COMPLETED', failure_code = 'WORKER_LOST',
+            failure_message = 'Worker heartbeat timed out and automatic attempts are exhausted', retryable = TRUE,
+            completed_at = #{now}, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+          AND heartbeat_at = #{observedHeartbeatAt}
+    </update>
+
+    <update id="incrementDownload">
+        UPDATE export_task_run SET download_count = download_count + 1, last_downloaded_at = #{now}, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'SUCCESS' AND file_expire_at &gt; #{now}
+    </update>
+    <update id="markFileMissing">
+        UPDATE export_task_run SET status = 'FAILED', stage = 'COMPLETED', failure_code = 'FILE_MISSING',
+            failure_message = 'Export file does not exist', retryable = FALSE, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'SUCCESS'
+    </update>
+    <update id="markExpired">
+        UPDATE export_task_run SET status = 'EXPIRED', stage = 'COMPLETED', file_path = NULL, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'SUCCESS' AND file_expire_at &lt;= #{now}
+    </update>
+</mapper>
