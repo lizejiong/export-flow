@@ -26,6 +26,8 @@ spring:
     password: ${RABBITMQ_PASSWORD:export_flow}
     publisher-confirm-type: correlated
     publisher-returns: true
+    template:
+      mandatory: true
     listener:
       simple:
         acknowledge-mode: manual
@@ -47,6 +49,8 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
     default-fetch-size: 1000
+    variables:
+      countTimeoutSeconds: ${app.export.count-timeout-seconds:5}
 
 management:
   endpoints:

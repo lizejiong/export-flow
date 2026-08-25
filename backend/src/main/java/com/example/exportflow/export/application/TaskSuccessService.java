@@ -1,9 +1,11 @@
 package com.example.exportflow.export.application;
 
+import com.example.exportflow.common.api.RequestIdContext;
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.infrastructure.ExportAttemptMapper;
 import com.example.exportflow.export.infrastructure.ExportRunMapper;
 import com.example.exportflow.export.infrastructure.ExportTaskMapper;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,11 +16,14 @@ public class TaskSuccessService {
     private final ExportTaskMapper taskMapper;
     private final ExportRunMapper runMapper;
     private final ExportAttemptMapper attemptMapper;
+    private final ApplicationEventPublisher events;
 
-    public TaskSuccessService(ExportTaskMapper taskMapper, ExportRunMapper runMapper, ExportAttemptMapper attemptMapper) {
+    public TaskSuccessService(ExportTaskMapper taskMapper, ExportRunMapper runMapper, ExportAttemptMapper attemptMapper,
+                              ApplicationEventPublisher events) {
         this.taskMapper = taskMapper;
         this.runMapper = runMapper;
         this.attemptMapper = attemptMapper;
+        this.events = events;
     }
 
     @Transactional
@@ -31,7 +36,10 @@ public class TaskSuccessService {
                 fileName, filePath, fileSize, exportedCount, completedAt, expireAt) != 1) {
             throw new IllegalStateException("Cannot complete current export run");
         }
-        attemptMapper.markSuccess(task.getExecutionToken(), completedAt);
+        if (attemptMapper.markSuccess(task.getExecutionToken(), completedAt) != 1) {
+            throw new IllegalStateException("Cannot complete current export attempt");
+        }
+        events.publishEvent(new TaskChangedEvent(task.getId(), "task.succeeded", RequestIdContext.currentOrCreate()));
         return true;
     }
 }

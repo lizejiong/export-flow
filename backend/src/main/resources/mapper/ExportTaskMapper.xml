@@ -202,7 +202,7 @@
 
     <update id="markFileMissing">
         UPDATE export_task SET status = 'FAILED', stage = 'COMPLETED', failure_code = 'FILE_MISSING',
-            failure_message = '导出文件不存在', retryable = FALSE, updated_at = #{now}
+            failure_message = '导出文件不存在', retryable = FALSE, updated_at = #{now}, version = version + 1
         WHERE id = #{taskId} AND status = 'SUCCESS'
     </update>
 
@@ -217,4 +217,10 @@
             updated_at = #{now}, version = version + 1
         WHERE id = #{taskId} AND status = 'SUCCESS' AND file_expire_at &lt;= #{now}
     </update>
+
+    <select id="countFileReferences" resultType="long">
+        SELECT
+          (SELECT COUNT(*) FROM export_task WHERE file_path = #{filePath}) +
+          (SELECT COUNT(*) FROM export_task_run WHERE file_path = #{filePath})
+    </select>
 </mapper>

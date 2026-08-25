@@ -1,5 +1,6 @@
 package com.example.exportflow.order;
 
+import com.example.exportflow.common.config.ExportProperties;
 import com.example.exportflow.order.application.OrderFilter;
 import com.example.exportflow.order.application.OrderService;
 import com.example.exportflow.order.infrastructure.OrderMapper;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -19,10 +21,10 @@ class OrderServiceTest {
     void pageQuerySuppliesNullSnapshotBoundaryToSharedFilterSql() {
         OrderMapper mapper = mock(OrderMapper.class);
         when(mapper.count(any(), isNull())).thenReturn(0L);
-        when(mapper.findPage(any(), isNull(), any(Integer.class), any(Integer.class))).thenReturn(List.of());
+        when(mapper.findPage(any(), isNull(), anyLong(), any(Integer.class))).thenReturn(List.of());
 
-        new OrderService(mapper).findPage(new OrderFilter(), 1, 20);
+        new OrderService(mapper, mock(ExportProperties.class)).findPage(new OrderFilter(), 1, 20);
 
-        verify(mapper).findPage(any(), isNull(), any(Integer.class), any(Integer.class));
+        verify(mapper).findPage(any(), isNull(), anyLong(), any(Integer.class));
     }
 }

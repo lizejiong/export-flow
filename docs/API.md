@@ -138,7 +138,7 @@ SSE、Excel 下载、Actuator 和 Swagger 不使用该 JSON 信封，保持各�
 
 ```text
 event:task.progress
-data:{"eventType":"task.progress","taskId":9,"status":"PROCESSING","stage":"QUERYING_WRITING","currentRunNo":1,"progress":64,"expectedCount":1000000,"exportedCount":660000,"fileSize":null,"fileExpireAt":null,"updatedAt":"2026-08-22T23:37:24"}
+data:{"eventType":"task.progress","taskId":9,"version":18,"requestId":"c47d0f38-acde-4fbb-aef3-acdeef5c90c3","status":"PROCESSING","stage":"QUERYING_WRITING","currentRunNo":1,"progress":64,"expectedCount":1000000,"exportedCount":660000,"fileSize":null,"fileExpireAt":null,"updatedAt":"2026-08-22T23:37:24"}
 ```
 
 `task.succeeded` 会同时携带 `fileSize` 和 `fileExpireAt`，前端可立即展示下载按钮。SSE 负责实时界面更新；终态到达后前端会自动发起一次 REST 校准，最终状态始终以 MySQL 为准。

@@ -73,3 +73,26 @@ docker compose config --quiet
 docker compose up -d --build
 docker compose ps
 ```
+
+## 核心可靠性回归
+
+以下约束属于任务主链路的固定验收项：
+
+- Task、Run、Attempt 的执行状态在同一事务中更新。Task fencing 未命中表示旧 Worker 已失效；Task 命中后 Run 或 Attempt 未命中必须回滚。
+- Redis/SSE 事件只在数据库事务提交后发布，并携带 `version`。前端只接受更大的版本号，SSE 健康时仍以 15 秒（有活动任务）或 60 秒（无活动任务）进行 REST 对账。
+- `app.export.heartbeat-interval` 同时控制进度持久化节流和独立执行心跳；独立心跳必须覆盖 Excel 最终写入和文件移动阶段。
+- 创建任务和手动重试的幂等写入在独立事务完成后处理唯一键冲突；并发相同 Key 只产生一份 Task/Run/Outbox 数据。
+- 文件缺失、文件过期状态原子更新 Task/Run。最终目录仅清理超过两小时且 Task/Run 均无引用的 `.xlsx`，存储路径拒绝目录越界和符号链接。
+- Outbox 消息包含 `schemaVersion` 和 `requestId`；只有 Rabbit confirm ACK 且没有 returned message 才能标记发布成功。
+- `app.export.count-timeout-seconds` 同时控制 MyBatis 查询超时和 API 提示。页码范围为 1..10000，分页大小只允许 20、50、100，参数类型转换失败返回 400。
+
+定向回归命令：
+
+```powershell
+# 后端核心事务、事件和幂等测试
+mvn '-Dtest=CoreReliabilityServicesTest,TaskEventPublisherTest,RetryServiceTest' test
+
+# 前端版本合并和 SSE/REST 对账测试
+Set-Location frontend
+pnpm.cmd test --run src/pages/tasks/taskPresentation.test.ts src/pages/tasks/useTaskEvents.test.tsx
+```

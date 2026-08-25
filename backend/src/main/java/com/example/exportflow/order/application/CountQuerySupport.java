@@ -6,14 +6,19 @@ import org.springframework.http.HttpStatus;
 import java.sql.SQLTimeoutException;
 
 public final class CountQuerySupport {
-    private CountQuerySupport() {}
+    private CountQuerySupport() {
+    }
 
     public static RuntimeException map(RuntimeException exception) {
+        return map(exception, 5);
+    }
+
+    public static RuntimeException map(RuntimeException exception, int timeoutSeconds) {
         Throwable current = exception;
         while (current != null) {
             if (current instanceof SQLTimeoutException || containsTimeout(current.getMessage())) {
                 return new BusinessException("EXPORT_COUNT_TIMEOUT", HttpStatus.UNPROCESSABLE_ENTITY,
-                        "统计超过 5 秒，请缩小筛选范围");
+                        "统计超过 " + timeoutSeconds + " 秒，请缩小筛选范围");
             }
             current = current.getCause();
         }
@@ -26,4 +31,3 @@ public final class CountQuerySupport {
         return lower.contains("timeout") || lower.contains("timed out") || lower.contains("超时");
     }
 }
-

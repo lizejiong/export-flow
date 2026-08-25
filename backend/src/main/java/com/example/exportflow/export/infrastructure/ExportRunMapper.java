@@ -11,6 +11,7 @@ import java.util.List;
 public interface ExportRunMapper {
     ExportTaskRun findById(@Param("id") long id);
     ExportTaskRun findByIdempotencyKey(@Param("key") String key);
+    ExportTaskRun findByIdempotencyKeyForUpdate(@Param("key") String key);
     List<ExportTaskRun> findByTaskId(@Param("taskId") long taskId);
     int insert(ExportTaskRun run);
     int markProcessing(@Param("runId") long runId, @Param("workerId") String workerId,
@@ -19,6 +20,8 @@ public interface ExportRunMapper {
     int updateProgress(@Param("runId") long runId, @Param("executionToken") String executionToken,
                        @Param("stage") String stage, @Param("progress") int progress,
                        @Param("exportedCount") long exportedCount, @Param("now") LocalDateTime now);
+    int heartbeat(@Param("runId") long runId, @Param("executionToken") String executionToken,
+                  @Param("now") LocalDateTime now);
     int markSuccess(@Param("runId") long runId, @Param("executionToken") String executionToken,
                     @Param("fileName") String fileName, @Param("filePath") String filePath,
                     @Param("fileSize") long fileSize, @Param("exportedCount") long exportedCount,

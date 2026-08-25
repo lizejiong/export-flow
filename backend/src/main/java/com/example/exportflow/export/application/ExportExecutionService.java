@@ -1,6 +1,7 @@
 package com.example.exportflow.export.application;
 
 import com.example.exportflow.common.config.ExportProperties;
+import com.example.exportflow.common.api.RequestIdContext;
 import com.example.exportflow.export.domain.ExportStage;
 import com.example.exportflow.export.domain.ExportTask;
 import com.example.exportflow.export.domain.ExportTaskStatus;
@@ -17,15 +18,14 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class ExportExecutionService {
     private static final Logger log = LoggerFactory.getLogger(ExportExecutionService.class);
-    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private final OrderMapper orderMapper;
     private final ExportTaskMapper taskMapper;
     private final OrderExcelWriter excelWriter;
@@ -35,11 +35,14 @@ public class ExportExecutionService {
     private final TaskSuccessService successService;
     private final ObjectMapper objectMapper;
     private final ExportProperties properties;
+    private final ExecutionHeartbeat executionHeartbeat;
+    private final Clock clock;
 
     public ExportExecutionService(OrderMapper orderMapper, ExportTaskMapper taskMapper,
                                   OrderExcelWriter excelWriter, LocalFileStorage storage, ProgressService progressService,
                                   TaskFailureService failureService, TaskSuccessService successService,
-                                  ObjectMapper objectMapper, ExportProperties properties) {
+                                  ObjectMapper objectMapper, ExportProperties properties,
+                                  ExecutionHeartbeat executionHeartbeat, Clock clock) {
         this.orderMapper = orderMapper;
         this.taskMapper = taskMapper;
         this.excelWriter = excelWriter;
@@ -49,30 +52,31 @@ public class ExportExecutionService {
         this.successService = successService;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.executionHeartbeat = executionHeartbeat;
+        this.clock = clock;
     }
 
     public void execute(ExportTask task) {
         Path temporary = null;
         LocalFileStorage.StoredFile stored = null;
+        ExecutionHeartbeat.Session heartbeat = executionHeartbeat.start(task);
         try {
             ensureCurrent(progressService.persist(task, ExportStage.PREPARING, 5, 0));
             temporary = storage.createTemporary(task);
             AtomicLong lastPersistedRows = new AtomicLong(0);
-            AtomicReference<LocalDateTime> lastPersistedAt = new AtomicReference<>(LocalDateTime.now(ZONE));
+            AtomicReference<LocalDateTime> lastPersistedAt = new AtomicReference<>(LocalDateTime.now(clock));
 
             OrderExcelWriter.BatchLoader loader = loader(task);
             long written = excelWriter.write(temporary, loader, exported -> {
                 int progress = task.getExpectedCount() == 0 ? 5
                         : Math.min(95, 5 + (int) Math.floor((double) exported / task.getExpectedCount() * 90));
-                LocalDateTime now = LocalDateTime.now(ZONE);
+                LocalDateTime now = LocalDateTime.now(clock);
                 boolean persist = exported - lastPersistedRows.get() >= 10_000
-                        || !now.isBefore(lastPersistedAt.get().plusSeconds(5));
+                        || !now.isBefore(lastPersistedAt.get().plus(properties.heartbeatInterval()));
                 if (persist) {
                     ensureCurrent(progressService.persist(task, ExportStage.QUERYING_WRITING, progress, exported));
                     lastPersistedRows.set(exported);
                     lastPersistedAt.set(now);
-                } else {
-                    progressService.publishOnly(task, ExportStage.QUERYING_WRITING, progress, exported);
                 }
             });
 
@@ -83,22 +87,20 @@ public class ExportExecutionService {
             ensureCurrent(progressService.persist(task, ExportStage.MOVING, 99, written));
             stored = storage.moveToFinal(task, temporary);
             temporary = null;
-            LocalDateTime completedAt = LocalDateTime.now(ZONE);
+            LocalDateTime completedAt = LocalDateTime.now(clock);
             LocalDateTime expireAt = completedAt.plus(properties.fileRetention());
             ensureCurrent(successService.complete(task, stored.downloadName(), stored.relativePath(), stored.size(),
                     written, completedAt, expireAt));
-            task.setStatus(ExportTaskStatus.SUCCESS);
-            task.setStage(ExportStage.COMPLETED);
-            task.setFileSize(stored.size());
-            task.setFileExpireAt(expireAt);
-            progressService.publish(task, "task.succeeded", ExportStage.COMPLETED, 100, written, completedAt);
         } catch (SupersededExecution exception) {
             if (stored != null) storage.deleteQuietly(stored.absolutePath());
             log.info("Execution superseded, taskId={}, token={}", task.getId(), task.getExecutionToken());
-        } catch (Throwable throwable) {
+        } catch (Exception exception) {
             if (stored != null) storage.deleteQuietly(stored.absolutePath());
-            failureService.handle(task, throwable);
+            log.error("Export failed, requestId={}, taskId={}, token={}", RequestIdContext.currentOrCreate(),
+                    task.getId(), task.getExecutionToken(), exception);
+            failureService.handle(task, exception);
         } finally {
+            heartbeat.close();
             storage.deleteQuietly(temporary);
         }
     }

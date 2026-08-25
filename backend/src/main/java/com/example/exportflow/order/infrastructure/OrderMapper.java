@@ -10,7 +10,7 @@ import java.util.List;
 @Mapper
 public interface OrderMapper {
     List<Order> findPage(@Param("filter") OrderFilter filter, @Param("snapshotMaxId") Long snapshotMaxId,
-                         @Param("offset") int offset, @Param("limit") int limit);
+                         @Param("offset") long offset, @Param("limit") int limit);
     long count(@Param("filter") OrderFilter filter, @Param("snapshotMaxId") Long snapshotMaxId);
     Long findMaxId();
     List<Long> findExistingIds(@Param("ids") List<Long> ids);

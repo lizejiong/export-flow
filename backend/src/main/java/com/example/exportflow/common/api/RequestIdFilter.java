@@ -22,11 +22,11 @@ public class RequestIdFilter extends OncePerRequestFilter {
         String requestId = normalize(request.getHeader(HEADER));
         request.setAttribute(ATTRIBUTE, requestId);
         response.setHeader(HEADER, requestId);
-        MDC.put("requestId", requestId);
+        MDC.put(RequestIdContext.MDC_KEY, requestId);
         try {
             chain.doFilter(request, response);
         } finally {
-            MDC.remove("requestId");
+            MDC.remove(RequestIdContext.MDC_KEY);
         }
     }
 
@@ -37,4 +37,3 @@ public class RequestIdFilter extends OncePerRequestFilter {
         return candidate;
     }
 }
-

@@ -63,7 +63,7 @@
         ORDER BY created_at DESC, id DESC LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <select id="count" resultType="long" timeout="5">
+    <select id="count" resultType="long" timeout="${countTimeoutSeconds}">
         SELECT COUNT(*) FROM orders WHERE 1=1 <include refid="filters"/>
     </select>
 

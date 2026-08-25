@@ -51,7 +51,7 @@ public interface ExportTaskMapper {
     long countItems(@Param("taskId") long taskId);
     List<ExportTask> findPageTasks(@Param("taskNo") String taskNo, @Param("exportType") ExportType exportType,
                                    @Param("status") ExportTaskStatus status, @Param("createdFrom") LocalDateTime createdFrom,
-                                   @Param("createdTo") LocalDateTime createdTo, @Param("offset") int offset,
+                                   @Param("createdTo") LocalDateTime createdTo, @Param("offset") long offset,
                                    @Param("limit") int limit);
     long countTasks(@Param("taskNo") String taskNo, @Param("exportType") ExportType exportType,
                     @Param("status") ExportTaskStatus status, @Param("createdFrom") LocalDateTime createdFrom,
@@ -61,4 +61,5 @@ public interface ExportTaskMapper {
     int markFileMissing(@Param("taskId") long taskId, @Param("now") LocalDateTime now);
     List<ExportTask> findExpired(@Param("now") LocalDateTime now, @Param("limit") int limit);
     int markExpired(@Param("taskId") long taskId, @Param("now") LocalDateTime now);
+    long countFileReferences(@Param("filePath") String filePath);
 }

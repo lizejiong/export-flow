@@ -31,14 +31,13 @@ public class ExportTaskQueryService {
     public PageResponse<TaskSummaryResponse> findPage(String taskNo, ExportType exportType, ExportTaskStatus status,
                                                       LocalDateTime createdFrom, LocalDateTime createdTo,
                                                       int page, int pageSize) {
-        int safePage = Math.max(1, page);
-        int safeSize = switch (pageSize) { case 20, 50, 100 -> pageSize; default -> 20; };
+        validatePage(page, pageSize);
         String normalizedTaskNo = taskNo == null || taskNo.isBlank() ? null : taskNo.trim();
         long total = taskMapper.countTasks(normalizedTaskNo, exportType, status, createdFrom, createdTo);
         List<TaskSummaryResponse> items = taskMapper.findPageTasks(normalizedTaskNo, exportType, status,
-                createdFrom, createdTo, (safePage - 1) * safeSize, safeSize).stream()
+                createdFrom, createdTo, ((long) page - 1) * pageSize, pageSize).stream()
                 .map(TaskSummaryResponse::from).toList();
-        return new PageResponse<>(items, safePage, safeSize, total);
+        return new PageResponse<>(items, page, pageSize, total);
     }
 
     public TaskDetailResponse detail(long taskId) {
@@ -54,5 +53,12 @@ public class ExportTaskQueryService {
         ExportTask task = taskMapper.findById(taskId);
         if (task == null || task.isArchived()) throw new BusinessException("TASK_NOT_FOUND", HttpStatus.NOT_FOUND, "导出任务不存在");
         return task;
+    }
+
+    private void validatePage(int page, int pageSize) {
+        if (page < 1 || page > 10_000 || (pageSize != 20 && pageSize != 50 && pageSize != 100)) {
+            throw new BusinessException("VALIDATION_ERROR", HttpStatus.BAD_REQUEST,
+                    "页码必须在 1 到 10000 之间，分页大小只能是 20、50 或 100");
+        }
     }
 }

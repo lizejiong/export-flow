@@ -11,7 +11,7 @@
 - 一个逻辑任务包含多个 Run：每个 Run 自动执行最多 3 次；最终失败后可在同一任务下手动发起新 Run，最多 2 次。
 - 数据库 CAS + `executionToken` 防止重复消费和旧 Worker 覆盖新结果，不依赖 Redis 分布式锁。
 - 真实进度、Run/Attempt 分层历史、心跳失联恢复、文件下载次数、24 小时过期清理。
-- SSE + Redis Pub/Sub 实时推送；连续 3 次连接失败后每 2 秒轮询，并每 5 秒尝试恢复 SSE。
+- SSE + Redis Pub/Sub 在数据库事务提交后推送版本化事件；连接正常时仍进行低频 REST 对账，连续 3 次连接失败后每 2 秒轮询，并每 5 秒尝试恢复 SSE。
 - 业务 JSON 统一使用 `code/message/data/requestId/timestamp` 响应信封；SSE、Excel 下载、Actuator 和 Swagger 保持标准协议。
 - 单 Sheet `.xlsx`、14 列、公式注入防护、SXSSF 流式写入；已实测导出 100 万行。
 

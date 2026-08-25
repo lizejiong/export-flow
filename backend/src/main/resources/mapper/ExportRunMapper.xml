@@ -45,6 +45,9 @@
     <select id="findByIdempotencyKey" resultMap="runResult">
         SELECT <include refid="runColumns"/> FROM export_task_run WHERE idempotency_key = #{key}
     </select>
+    <select id="findByIdempotencyKeyForUpdate" resultMap="runResult">
+        SELECT <include refid="runColumns"/> FROM export_task_run WHERE idempotency_key = #{key} FOR UPDATE
+    </select>
     <select id="findByTaskId" resultMap="runResult">
         SELECT <include refid="runColumns"/> FROM export_task_run WHERE task_id = #{taskId} ORDER BY run_no
     </select>
@@ -72,6 +75,11 @@
     <update id="updateProgress">
         UPDATE export_task_run SET stage = #{stage}, progress = #{progress}, exported_count = #{exportedCount},
             heartbeat_at = #{now}, updated_at = #{now}
+        WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
+    </update>
+
+    <update id="heartbeat">
+        UPDATE export_task_run SET heartbeat_at = #{now}, updated_at = #{now}
         WHERE id = #{runId} AND status = 'PROCESSING' AND execution_token = #{executionToken}
     </update>
 

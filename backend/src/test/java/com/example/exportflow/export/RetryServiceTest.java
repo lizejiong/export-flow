@@ -84,6 +84,22 @@ class RetryServiceTest {
         assertThat(response.idempotentReplay()).isTrue();
     }
 
+    @Test
+    void rechecksTheIdempotencyKeyAfterAcquiringTheTaskLock() {
+        ExportTask source = failedTask(0, 2);
+        ExportTaskRun winner = new ExportTaskRun();
+        winner.setTaskId(11L);
+        winner.setRequestHash(retryHash(11L));
+        when(taskMapper.findByIdForUpdate(11L)).thenReturn(source);
+        when(runMapper.findByIdempotencyKeyForUpdate("retry-key-0004")).thenReturn(winner);
+        when(taskMapper.findById(11L)).thenReturn(source);
+
+        var response = service.retry(11L, "retry-key-0004");
+
+        assertThat(response.idempotentReplay()).isTrue();
+        verify(runMapper, org.mockito.Mockito.never()).insert(any());
+    }
+
     private ExportTask failedTask(int retryCount, int retryLimit) {
         ExportTask task = new ExportTask();
         task.setId(11L);

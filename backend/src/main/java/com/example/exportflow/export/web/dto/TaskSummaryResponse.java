@@ -9,6 +9,7 @@ import java.time.LocalDateTime;
 
 public record TaskSummaryResponse(
         long id,
+        long version,
         String taskNo,
         ExportType exportType,
         ExportTaskStatus status,
@@ -31,7 +32,7 @@ public record TaskSummaryResponse(
         LocalDateTime completedAt
 ) {
     public static TaskSummaryResponse from(ExportTask task) {
-        return new TaskSummaryResponse(task.getId(), task.getTaskNo(), task.getExportType(), task.getStatus(),
+        return new TaskSummaryResponse(task.getId(), task.getVersion(), task.getTaskNo(), task.getExportType(), task.getStatus(),
                 task.getStage(), task.getExpectedCount(), task.getExportedCount(), task.getProgress(),
                 task.getFileSize(), task.getFileExpireAt(), task.getAutoAttemptCount(), task.getCurrentRunNo(),
                 task.getManualRetryCount(), task.getManualRetryLimit(), canManualRetry(task),

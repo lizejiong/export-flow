@@ -65,6 +65,7 @@ export interface CreatedTask {
 
 export interface TaskSummary {
   id: number
+  version: number
   taskNo: string
   exportType: ExportType
   status: TaskStatus
@@ -141,6 +142,8 @@ export interface TaskFilters {
 export interface TaskProgressEvent {
   eventType: string
   taskId: number
+  version: number
+  requestId?: string
   status: TaskStatus
   stage: string
   currentRunNo: number

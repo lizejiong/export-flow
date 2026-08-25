@@ -9,7 +9,7 @@ import { useSearchParams } from 'react-router-dom'
 import { ApiError, api, newIdempotencyKey } from '../../api/client'
 import type { PageResponse, TaskFilters, TaskProgressEvent, TaskSummary } from '../../api/types'
 import TaskDetailDrawer from './TaskDetailDrawer'
-import { formatBytes, mergeTaskEvent, stageLabels, statusColors, taskStatusLabels } from './taskPresentation'
+import { formatBytes, mergeTaskEvent, stageLabels, statusColors, taskReconciliationInterval, taskStatusLabels } from './taskPresentation'
 import { useTaskEvents } from './useTaskEvents'
 
 interface FilterValues extends Omit<TaskFilters, 'createdFrom' | 'createdTo'> { createdRange?: [Dayjs, Dayjs] }
@@ -27,7 +27,7 @@ export default function TasksPage() {
   const onEvent = useCallback((event: TaskProgressEvent) => {
     queryClient.setQueriesData<PageResponse<TaskSummary>>({ queryKey: ['tasks'] }, (current) => current ? ({ ...current, items: current.items.map((task) => mergeTaskEvent(task, event)) }) : current)
     queryClient.invalidateQueries({ queryKey: ['task-detail', event.taskId] })
-    if (['task.succeeded', 'task.failed', 'task.expired'].includes(event.eventType)) {
+    if (['task.created', 'task.retrying', 'task.succeeded', 'task.failed', 'task.expired'].includes(event.eventType)) {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
     }
   }, [queryClient])
@@ -35,7 +35,11 @@ export default function TasksPage() {
 
   const tasks = useQuery({
     queryKey: ['tasks', filters, page, pageSize], queryFn: () => api.tasks(filters, page, pageSize),
-    refetchInterval: eventMode === 'polling' ? 2000 : false,
+    refetchInterval(query) {
+      if (eventMode !== 'sse') return 2_000
+      const data = query.state.data as PageResponse<TaskSummary> | undefined
+      return taskReconciliationInterval(eventMode, data?.items)
+    },
   })
 
   useEffect(() => { if (highlightedId) setDetailId(highlightedId) }, [highlightedId])
