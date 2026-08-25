@@ -1,36 +1,35 @@
 # Export Flow
 
-一个以学习为目标、可本地运行的异步订单导出项目。前端使用 React，后端使用 Spring Boot；创建任务后由 Transactional Outbox 保证消息最终投递，RabbitMQ 消费者使用数据库状态机抢占任务，Apache POI SXSSF 流式生成 `.xlsx`，任务页通过 SSE 展示真实进度，并在 SSE 连续失败后降级为 REST 轮询。
+基于 Spring Boot 和 React 的异步订单导出系统。任务通过 RabbitMQ 异步执行，使用 Apache POI SXSSF 流式生成 `.xlsx`，并通过 SSE 向前端同步状态和进度。
 
-## 已实现能力
+## 功能概览
 
-- 订单页支持 9 组筛选条件、20/50/100 分页、跨分页勾选和 5,000 条选择上限。
-- 支持“导出已选”和“按条件导出”；条件任务创建时同步统计，最长等待 5 秒，最多 1,000,000 条。
-- `Idempotency-Key`：相同 Key + 相同请求返回原任务；相同 Key + 不同请求返回 409；不同 Key 可创建新任务。
-- MySQL 保存任务真相，Outbox 与任务同事务写入；RabbitMQ 使用主队列、延迟重试队列和死信队列。
-- 一个逻辑任务包含多个 Run：每个 Run 自动执行最多 3 次；最终失败后可在同一任务下手动发起新 Run，最多 2 次。
-- 数据库 CAS + `executionToken` 防止重复消费和旧 Worker 覆盖新结果，不依赖 Redis 分布式锁。
-- 真实进度、Run/Attempt 分层历史、心跳失联恢复、文件下载次数、24 小时过期清理。
-- SSE + Redis Pub/Sub 在数据库事务提交后推送版本化事件；连接正常时仍进行低频 REST 对账，连续 3 次连接失败后每 2 秒轮询，并每 5 秒尝试恢复 SSE。
-- 业务 JSON 统一使用 `code/message/data/requestId/timestamp` 响应信封；SSE、Excel 下载、Actuator 和 Swagger 保持标准协议。
-- 单 Sheet `.xlsx`、14 列、公式注入防护、SXSSF 流式写入；已实测导出 100 万行。
+- 按筛选条件导出或跨分页选择订单导出
+- 支持 20/50/100 分页、5,000 条选择上限和 1,000,000 条条件导出上限
+- 使用 `Idempotency-Key` 保证任务创建和手动重试的幂等性
+- 任务按 Task、Run、Attempt 三层记录执行状态和历史
+- 自动重试、手动重试、Worker 失联恢复和执行令牌 fencing
+- 实时进度、SSE 断线重连及 REST 定期对账
+- 文件下载统计、缺失检测、24 小时过期和孤儿文件清理
+- 统一 API 响应、请求 ID 及跨消息链路日志追踪
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  UI["React 订单页 / 任务页"] -->|REST / SSE| API["Spring Boot"]
-  API -->|任务 + Outbox 同事务| DB[(MySQL)]
-  OB["Outbox Publisher"] -->|Publisher Confirm| MQ[(RabbitMQ)]
-  DB --> OB
-  MQ --> WK["Export Listener"]
-  WK -->|CAS 抢占 / 分批查询| DB
-  WK -->|SXSSF| FS["本地文件卷"]
-  WK -->|进度 / PubSub| RD[(Redis)]
-  RD --> API
+  UI["React"] -->|"REST / SSE"| API["Spring Boot API"]
+  API -->|"Task + Outbox"| DB[(MySQL)]
+  DB --> PUB["Outbox Publisher"]
+  PUB -->|"Publisher Confirm"| MQ[(RabbitMQ)]
+  MQ --> WORKER["Export Worker"]
+  WORKER -->|"CAS / Heartbeat"| DB
+  WORKER -->|"SXSSF"| FILES["Export Files"]
+  DB --> EVENT["After-commit Event"]
+  EVENT --> REDIS[(Redis Pub/Sub)]
+  REDIS --> API
 ```
 
-项目刻意不使用 XXL-JOB：当前恢复、Outbox 发布和文件清理由 Spring `@Scheduled` 完成，更适合单体学习项目。以后扩展成多服务、多实例调度中心时，再引入 XXL-JOB 会更有学习价值。
+MySQL 是任务状态的事实源。Task、Run 和 Attempt 在同一事务中更新；Outbox 与任务数据一同提交。SSE 事件在事务提交后发布并携带数据库版本，前端据此处理乱序事件，同时保留低频 REST 校准。
 
 ## 技术栈
 
@@ -38,9 +37,9 @@ flowchart LR
 - MySQL 8.4、RabbitMQ 4.2、Redis 8.2
 - React 19、TypeScript 7、Vite 8、Ant Design 6、TanStack Query 5、Vitest 4
 
-## 最快启动：Docker Compose
+## Docker Compose 启动
 
-前置条件：Docker Desktop 可用，端口 `3306`、`5672`、`6379`、`8080`、`5173` 未被占用。
+需要 Docker Desktop，并确保 `3306`、`5672`、`6379`、`8080`、`5173` 端口可用。
 
 ```powershell
 Copy-Item .env.example .env
@@ -48,38 +47,37 @@ docker compose up -d --build
 docker compose ps
 ```
 
-访问：
+服务地址：
 
-- 前端：`http://localhost:5173`
-- 后端健康检查：`http://localhost:8080/actuator/health`
-- Swagger UI：`http://localhost:8080/swagger-ui.html`
-- RabbitMQ 管理台：`http://localhost:15672`，默认账号/密码均为 `export_flow`
+- Web：<http://localhost:5173>
+- API 健康检查：<http://localhost:8080/actuator/health>
+- Swagger UI：<http://localhost:8080/swagger-ui.html>
+- RabbitMQ 管理台：<http://localhost:15672>
 
-Compose 默认用 `dev` Profile 生成 100,000 条订单。修改 `.env` 中的 `APP_SEED_ORDERS=1000000` 可补齐到 100 万条；生成器只追加缺少的数据，不会删除已有订单。
+RabbitMQ 默认用户名和密码均为 `export_flow`。`dev` Profile 默认生成 100,000 条订单；可在 `.env` 中调整 `APP_SEED_ORDERS`。
 
-## 用 IDEA 启动后端
+停止服务：
 
-你的 IntelliJ IDEA 自带 JBR 可以启动本项目；项目编译目标仍固定为 Java 21。推荐操作：
+```powershell
+docker compose down
+```
 
-1. 先只启动中间件：
+## 本地开发
 
-   ```powershell
-   docker compose up -d mysql rabbitmq redis
-   ```
+先启动基础设施：
 
-2. 在 IDEA 中打开 `backend/pom.xml`，等待 Maven 导入完成。
-3. Run Configuration 选择 `com.example.exportflow.ExportFlowApplication`。
-4. Program arguments 填入：
+```powershell
+docker compose up -d mysql rabbitmq redis
+```
 
-   ```text
-   --spring.profiles.active=dev --app.seed.orders=100000
-   ```
+启动后端：
 
-5. 如果 8080 已被占用，再加 `--server.port=18080`。
+```powershell
+Set-Location backend
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+```
 
-Flyway 会自动创建五张核心表；`dev` Profile 会按参数分批补充订单。默认数据库、RabbitMQ、Redis 都连接 `localhost`。
-
-## 本地启动前端
+启动前端：
 
 ```powershell
 Set-Location frontend
@@ -88,42 +86,41 @@ $env:VITE_API_TARGET='http://localhost:8080'
 pnpm.cmd dev
 ```
 
-如果 IDEA 后端改为 18080，把 `VITE_API_TARGET` 同步改为 `http://localhost:18080`。若 5173 被占用，Vite 会自动选择下一个端口。
+后端也可以从 IDE 运行 `com.example.exportflow.ExportFlowApplication`，Program arguments 使用：
 
-## 常用开发命令
+```text
+--spring.profiles.active=dev --app.seed.orders=100000
+```
+
+## 验证
 
 ```powershell
-# 后端（JDK 21+）
+# 后端
 Set-Location backend
 mvn test
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
 # 前端
-Set-Location frontend
+Set-Location ../frontend
 pnpm.cmd lint
 pnpm.cmd test --run
 pnpm.cmd build
+
+# Compose
+Set-Location ..
+docker compose config --quiet
 ```
 
 ## 目录
 
 ```text
-backend/                  Spring Boot API、MQ Consumer、调度器
-frontend/                 React 两页面应用
-docs/PRD.md               完整产品需求
-docs/API.md               REST、SSE 与错误说明
-docs/DEMO.md              学习与故障演示脚本
-docs/TESTING.md           测试命令和本机实测结果
-data/exports/             运行时导出文件（已被 Git 忽略）
-compose.yaml              完整本地环境
+backend/                  Spring Boot API、消息消费和调度任务
+frontend/                 React Web 应用
+docs/PRD.md               产品需求与状态机
+docs/API.md               REST、SSE 和错误码
+docs/DEMO.md              演示与故障注入
+docs/TESTING.md           测试与验收说明
+data/exports/             运行时导出文件
+compose.yaml              本地服务编排
 ```
 
-## 常见问题
-
-- Docker Hub 出现 `failed to fetch oauth token`：这是镜像仓库网络或 IPv6 连接问题，重试 `docker compose up -d --build`，或先用 Compose 启动三个中间件、再从 IDEA 启动后端。
-- RabbitMQ 报 `.erlang.cookie: eacces`：当前 Compose 已显式设置 `RABBITMQ_ERLANG_COOKIE`。若数据卷是旧版本创建的，可修正该卷所有者后重启 RabbitMQ。
-- 8080/5173 被占用：分别使用 `--server.port=18080` 和 Vite 自动端口，并设置 `VITE_API_TARGET`。
-- 前端显示“轮询降级”：SSE 连续 3 次连接失败后的正常降级，每 5 秒自动尝试恢复，任务数据仍以 MySQL REST 查询为准。
-- 文件不可下载：只有 `SUCCESS` 且未过 24 小时的任务允许下载；文件丢失或过期会返回明确错误码。
-
-详细决策、范围和状态机见 [PRD](docs/PRD.md)。
+更多接口和状态说明见 [API 文档](docs/API.md) 与 [产品文档](docs/PRD.md)。
